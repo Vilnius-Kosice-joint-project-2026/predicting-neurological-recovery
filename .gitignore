@@ -207,3 +207,4 @@ marimo/_lsp/
 __marimo__/
 *.mat
 *.hea
+/icare_data/training
