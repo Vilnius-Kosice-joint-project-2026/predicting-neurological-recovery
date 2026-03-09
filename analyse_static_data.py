@@ -95,12 +95,45 @@ def convert_column_types(training_dataframe: pd.DataFrame) -> pd.DataFrame:
 
 def main() -> None:
     """Build and print training DataFrame details."""
-    training_root_path = Path("icare_data") / "training"
-    training_dataframe = build_training_dataframe(training_root_path)
+
+    # If .parquet file already exists, load it directly for faster analysis.
+    parquet_path = Path("training_data.parquet")
+
+    if parquet_path.exists():
+        training_dataframe = pd.read_parquet(parquet_path)
+    else:
+        training_root_path = Path("icare_data") / "training"
+        training_dataframe = build_training_dataframe(training_root_path)
+
+        training_dataframe.to_parquet("training_data.parquet", index=False)
 
     print("Loaded rows:", len(training_dataframe))
     print("Columns:", list(training_dataframe.columns))
     print(training_dataframe.head())
+
+    # Search for missing values
+    missing_values = training_dataframe.isnull().sum()
+    print("\nMissing values per column:")
+    print(missing_values)
+
+    # Numerical characteristics of quantitative variables
+    # min, q1, q2, miu, q3, max
+    print("\nNumerical summary:")
+    print(round(training_dataframe.describe(), 2))
+
+    # Table of count and percentange of Good and Poor outcomes
+    outcome_counts = training_dataframe["Outcome"].value_counts(dropna=False)
+    outcome_percentages = (
+        training_dataframe["Outcome"].value_counts(dropna=False, normalize=True) * 100
+    )
+    outcome_summary = pd.DataFrame(
+        {
+            "Count": outcome_counts,
+            "Percentage": outcome_percentages.round(2),
+        }
+    )
+
+    print(outcome_summary)
 
 
 if __name__ == "__main__":
