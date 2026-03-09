@@ -208,3 +208,4 @@ __marimo__/
 *.mat
 *.hea
 /icare_data/training
+training_data.parquet
