@@ -37,7 +37,7 @@ from typing import Optional
 BASE_URL = "https://physionet.org/files/i-care/2.1/"
 MAX_HOURS = 72
 DEFAULT_HOURS = 2
-DEFAULT_WORKERS = 8
+DEFAULT_WORKERS = 2
 DOWNLOAD_MANIFEST = "icare_download_manifest.json"
 
 # Matches:  PPPP_SSS_EEE_TYPE.ext
