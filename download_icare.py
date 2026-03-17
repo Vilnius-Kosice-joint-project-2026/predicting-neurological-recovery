@@ -26,10 +26,10 @@ import argparse
 import json
 import re
 import sys
-import time
 import threading
-from pathlib import Path
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 from typing import Optional
 
 # ── Configuration ─────────────────────────────────────────────────────────────
@@ -37,7 +37,7 @@ from typing import Optional
 BASE_URL = "https://physionet.org/files/i-care/2.1/"
 MAX_HOURS = 72
 DEFAULT_HOURS = 2
-DEFAULT_WORKERS = 8
+DEFAULT_WORKERS = 2
 DOWNLOAD_MANIFEST = "icare_download_manifest.json"
 
 # Matches:  PPPP_SSS_EEE_TYPE.ext
@@ -107,7 +107,7 @@ def want_file(
                 return False
         except ValueError:
             pass
-    
+
     if filename.endswith(".txt"):
         return True
     m = FILE_RE.match(filename)
@@ -141,9 +141,10 @@ def crawl_all_patients(
     Optionally filter by patient ID range (min_patient to max_patient).
     """
     try:
-        import requests
-        from urllib.parse import urljoin
         from html.parser import HTMLParser
+        from urllib.parse import urljoin
+
+        import requests
     except ImportError:
         sys.exit("Run: pip install requests")
 
@@ -235,7 +236,9 @@ def crawl_all_patients(
 # ── Phase 2: parallel file download ──────────────────────────────────────────
 
 
-def download_files_parallel(file_list: list, dest: str, auth, workers: int, manifest: dict) -> dict:
+def download_files_parallel(
+    file_list: list, dest: str, auth, workers: int, manifest: dict
+) -> dict:
     """
     Download all files in file_list using a thread pool.
     Each worker uses its own requests.Session for connection reuse.
@@ -274,7 +277,7 @@ def download_files_parallel(file_list: list, dest: str, auth, workers: int, mani
         # Check if already downloaded (in manifest or exists locally)
         if rel in manifest["downloaded"]:
             return "skip", rel, 0, "already_downloaded"
-        
+
         local = Path(dest) / rel
         if local.exists():
             # Backfill manifest with already-existing local files.
@@ -371,7 +374,9 @@ def download_python(
 
     file_list = crawl_all_patients(hours, auth, workers, min_patient, max_patient)
     if not file_list:
-        print("  No files matched. Check --hours value, patient range, or network access.")
+        print(
+            "  No files matched. Check --hours value, patient range, or network access."
+        )
         return
 
     totals = download_files_parallel(file_list, dest, auth, workers, manifest)
@@ -444,7 +449,9 @@ def main():
 
     t0 = time.time()
     if args.method == "python":
-        download_python(hours, args.dest, args.workers, args.min_patient, args.max_patient)
+        download_python(
+            hours, args.dest, args.workers, args.min_patient, args.max_patient
+        )
 
     print(f"\nTotal time: {time.time()-t0:.1f}s  →  {Path(args.dest).resolve()}")
 
