@@ -1,0 +1,15 @@
+[tool.black]
+line-length = 88
+target-version = ["py311"]
+extend-exclude = '''
+(
+	^icare_data/
+)
+'''
+
+[tool.isort]
+line_length = 88
+profile = "black"
+py_version = 311
+skip_gitignore = true
+extend_skip_glob = ["icare_data/**"]
