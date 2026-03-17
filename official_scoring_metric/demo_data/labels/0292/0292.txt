@@ -1,0 +1,10 @@
+Patient: 0292
+Hospital: B
+Age: 56
+Sex: Male
+ROSC: nan
+OHCA: True
+Shockable Rhythm: False
+TTM: 34
+Outcome: Good
+CPC: 3

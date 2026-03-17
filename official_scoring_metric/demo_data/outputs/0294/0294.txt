@@ -1,0 +1,4 @@
+Patient: 0294
+Outcome: Good
+Outcome Probability: 0.499
+CPC: 5.0
