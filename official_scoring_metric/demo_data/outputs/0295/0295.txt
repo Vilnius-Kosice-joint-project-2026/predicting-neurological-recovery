@@ -1,0 +1,4 @@
+Patient: 0295
+Outcome: Poor
+Outcome Probability: 0.711
+CPC: 2.0

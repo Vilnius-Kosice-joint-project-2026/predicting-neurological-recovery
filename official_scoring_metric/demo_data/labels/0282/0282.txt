@@ -1,0 +1,10 @@
+Patient: 0282
+Hospital: A
+Age: 85
+Sex: Female
+ROSC: nan
+OHCA: True
+Shockable Rhythm: False
+TTM: 35
+Outcome: Good
+CPC: 2
