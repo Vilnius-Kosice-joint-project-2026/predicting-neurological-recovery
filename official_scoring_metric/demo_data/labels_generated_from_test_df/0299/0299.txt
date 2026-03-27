@@ -1,0 +1,4 @@
+Patient: 0299
+Hospital: A
+Outcome: Good
+CPC: 1.0
