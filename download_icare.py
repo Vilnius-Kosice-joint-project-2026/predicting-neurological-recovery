@@ -10,9 +10,9 @@ Filename format: PPPP_SSS_EEE_TYPE.ext
 
 "First 2 hours" means SSS <= 002 (start hour 001 or 002).
 
-How it works (python method):
+How it works:
   Phase 1 - crawl all patient directory listings IN PARALLEL (fast, just HTML)
-  Phase 2 - download all matching files IN PARALLEL (8 workers by default)
+  Phase 2 - download all matching files IN PARALLEL (2 workers by default)
   Resume-safe: skips files that already exist on disk.
 
 Usage:

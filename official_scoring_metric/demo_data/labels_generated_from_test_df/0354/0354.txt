@@ -1,0 +1,4 @@
+Patient: 0354
+Hospital: E
+Outcome: Good
+CPC: 2.0

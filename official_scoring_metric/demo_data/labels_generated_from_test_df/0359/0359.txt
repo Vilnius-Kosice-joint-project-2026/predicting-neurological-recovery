@@ -1,0 +1,4 @@
+Patient: 0359
+Hospital: A
+Outcome: Poor
+CPC: 5.0

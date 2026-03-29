@@ -1,0 +1,4 @@
+Patient: 0359
+Outcome: Good
+Outcome Probability: 0.525
+CPC: 3.099
