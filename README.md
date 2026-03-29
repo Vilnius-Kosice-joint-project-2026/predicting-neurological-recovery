@@ -9,6 +9,12 @@ conda env create -f environment.yml
 conda activate eeg
 ```
 
+# Data download
+```python
+python download_icare.py                          # first 2 hours
+python download_icare.py --hours 6                # first 6 hours
+```
+
 # Code formatting (black + isort)
 
 This repository uses:

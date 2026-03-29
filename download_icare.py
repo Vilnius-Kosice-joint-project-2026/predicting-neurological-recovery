@@ -17,9 +17,8 @@ How it works:
 
 Usage:
     pip install requests
-    python download_icare.py                          # first 2 hours, 8 workers
+    python download_icare.py                          # first 2 hours
     python download_icare.py --hours 6                # first 6 hours
-    python download_icare.py --workers 16             # more parallelism
 """
 
 import argparse
