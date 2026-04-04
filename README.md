@@ -5,7 +5,7 @@ This project focuses on using Transformers and context-aware Large Language Mode
 # Conda
 
 ```powershell
-conda env create -f environment.yml
+conda env create -f environment.yml -n eeg
 conda activate eeg
 ```
 

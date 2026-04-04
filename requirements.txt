@@ -5,3 +5,5 @@ scipy
 matplotlib
 librosa
 mne
+Pillow
+opencv-python

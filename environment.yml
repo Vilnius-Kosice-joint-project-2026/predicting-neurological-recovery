@@ -10,7 +10,10 @@ dependencies:
   - numpy
   - scipy
   - matplotlib
+  - pillow
+  - librosa
   - mne
+  - opencv
   - requests
   - pyarrow
   - scikit-learn
