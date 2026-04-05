@@ -212,3 +212,5 @@ training_data.parquet
 /official_scoring_metric/demo_data/outputs_generated
 /official_scoring_metric/demo_data/labels_generated_from_test_df
 /exports/mel_360x360
+/exports/mel_stitched
+/exports/mel_volumes
