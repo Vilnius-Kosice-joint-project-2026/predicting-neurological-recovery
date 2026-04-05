@@ -70,6 +70,13 @@ def convert_column_types(training_dataframe: pd.DataFrame) -> pd.DataFrame:
             A DataFrame with converted numeric and boolean columns.
     """
     converted_dataframe = normalize_string_missing_values(training_dataframe)
+    if "Patient" in converted_dataframe.columns:
+        # Ensure patient ids align with folder naming like 0284.
+        patient_series = converted_dataframe["Patient"].astype("string").str.strip()
+        patient_series = patient_series.str.replace(r"\.0$", "", regex=True)
+        converted_dataframe["Patient"] = patient_series.where(
+            patient_series.isna(), patient_series.str.zfill(4)
+        )
     for numeric_column in ["Age", "TTM", "CPC", "ROSC"]:
         if numeric_column in converted_dataframe.columns:
             converted_dataframe[numeric_column] = pd.to_numeric(
