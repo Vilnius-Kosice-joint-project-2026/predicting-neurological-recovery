@@ -206,7 +206,7 @@ def create_grid_stitched_image(image_paths: list[Path], output_path: Path) -> No
 
     stitched_grid = np.vstack(stitched_rows)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    Image.fromarray(stitched_grid, mode="RGB").save(output_path)
+    Image.fromarray(stitched_grid, mode="L").convert("RGB").save(output_path)
 
 
 
@@ -259,48 +259,35 @@ patients_with_images = set(
 )
 print(f"Patients with images: {len(patients_with_images)}")
 
-# Patient-level split for model training and evaluation.
+# 1. Filter out rows without outcomes or images FIRST
 split_df = training_dataframe.dropna(subset=["Outcome"]).copy()
+split_df["has_images"] = split_df["Patient"].isin(patients_with_images)
+valid_patients_df = split_df[split_df["has_images"]].copy()
 
-train_df, test_df = train_test_split(
-    split_df,
+# 2. Drop duplicates at the patient level so each patient is exactly one row
+patient_level_df = valid_patients_df.drop_duplicates(subset=["Patient"]).copy()
+
+# 3. Now split 80/20 safely
+train_patient_df, test_patient_df = train_test_split(
+    patient_level_df,
     test_size=0.2,
-    stratify=split_df["Outcome"],
+    stratify=patient_level_df["Outcome"],
     random_state=1234,
 )
 
-train_df["has_images"] = train_df["Patient"].isin(patients_with_images)
-test_df["has_images"] = test_df["Patient"].isin(patients_with_images)
-
-train_df_with_images = train_df[train_df["has_images"]].copy()
-test_df_with_images = test_df[test_df["has_images"]].copy()
-
-patient_level_train_df = train_df_with_images.drop_duplicates(subset=["Patient"]).copy()
-patient_level_train_df = patient_level_train_df.sort_values(
-    ["Outcome", "Patient"]
-).reset_index(drop=True)
-
-validation_patient_count = max(2, round(len(patient_level_train_df) * 0.15))
-validation_patient_count = min(
-    validation_patient_count, len(patient_level_train_df) - 1
+# 4. Create the Validation split from the Train split
+validation_patient_count = max(2, round(len(train_patient_df) * 0.15))
+train_patient_df, val_patient_df = train_test_split(
+    train_patient_df,
+    test_size=validation_patient_count,
+    stratify=train_patient_df["Outcome"],
+    random_state=415,
 )
 
-if patient_level_train_df["Outcome"].value_counts().min() < 2:
-    train_patient_df = patient_level_train_df.copy()
-    val_patient_df = patient_level_train_df.iloc[0:0].copy()
-else:
-    train_patient_df, val_patient_df = train_test_split(
-        patient_level_train_df,
-        test_size=validation_patient_count,
-        stratify=patient_level_train_df["Outcome"],
-        random_state=415,
-    )
-
+# 5. Build image dataframes directly from these safe splits
 train_image_dataframe = build_image_dataframe(train_patient_df, training_images_root)
 val_image_dataframe = build_image_dataframe(val_patient_df, training_images_root)
-test_image_dataframe = build_image_dataframe(
-    test_df_with_images.drop_duplicates(subset=["Patient"]), training_images_root
-)
+test_image_dataframe = build_image_dataframe(test_patient_df, training_images_root)
 
 train_image_dataframe = materialize_segment_artifacts(
     train_image_dataframe,
@@ -321,7 +308,7 @@ test_image_dataframe = materialize_segment_artifacts(
 print("Train patients:", train_patient_df.shape[0])
 print("Validation patients:", val_patient_df.shape[0])
 print(
-    "Test patients:", test_df_with_images.drop_duplicates(subset=["Patient"]).shape[0]
+    "Test patients:", test_patient_df.shape[0]
 )
 print("Train images:", len(train_image_dataframe))
 print("Validation images:", len(val_image_dataframe))

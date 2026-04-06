@@ -19,7 +19,8 @@ from sklearn.metrics import confusion_matrix
 
 
 SEED = 1234
-IMG_SIZE = 224
+IMG_HEIGHT = 224
+IMG_WIDTH = 448
 NUM_CLASSES = 2
 BATCH_SIZE = 32
 EPOCHS = 30
@@ -77,38 +78,38 @@ print('train:', train_x.shape, train_y.shape)
 print('val:', val_x.shape, val_y.shape)
 print('test:', test_x.shape, test_y.shape)
 
-# Build tf.data datasets
 def load_grid_image(file_path: tf.Tensor, label: tf.Tensor) -> tuple[tf.Tensor, tf.Tensor]:
     image_bytes = tf.io.read_file(file_path)
-    image = tf.image.decode_png(image_bytes, channels=3)  # force 3 channels 
-    image = tf.image.resize(image, (IMG_SIZE, IMG_SIZE))
+    image = tf.image.decode_png(image_bytes, channels=3)
+    # Use standard resize now that the target shape matches the original ratio
+    image = tf.image.resize(image, (IMG_HEIGHT, IMG_WIDTH))
     image = tf.cast(image, tf.float32)
     return image, label
 
 load_func = load_grid_image
 
 train_dataset = tf.data.Dataset.from_tensor_slices((train_x, train_y))
-train_dataset = train_dataset.shuffle(buffer_size=len(train_x), reshuffle_each_iteration=True)
 train_dataset = train_dataset.map(load_func, num_parallel_calls=tf.data.AUTOTUNE)
+train_dataset = train_dataset.cache()
+train_dataset = train_dataset.shuffle(buffer_size=len(train_x), reshuffle_each_iteration=True)
 train_dataset = train_dataset.batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
 
 validation_dataset = tf.data.Dataset.from_tensor_slices((val_x, val_y))
 validation_dataset = validation_dataset.map(load_func, num_parallel_calls=tf.data.AUTOTUNE)
+validation_dataset = validation_dataset.cache()
 validation_dataset = validation_dataset.batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
 
 test_dataset = tf.data.Dataset.from_tensor_slices((test_x, test_y))
 test_dataset = test_dataset.map(load_func, num_parallel_calls=tf.data.AUTOTUNE)
+validation_dataset = validation_dataset.cache()
 test_dataset = test_dataset.batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
 
-# Build data augmentation pipeline
 data_augmentation = tf.keras.Sequential([
-    layers.RandomTranslation(height_factor=0.1, width_factor=0.1),
-    layers.RandomZoom(height_factor=0.1, width_factor=0.1),
-    layers.RandomRotation(factor=0.05),
+    layers.RandomTranslation(height_factor=0.0, width_factor=0.1),
 ], name="data_augmentation")
 
 # Build and compile EfficientNetB0 with ImageNet weights
-inputs = layers.Input(shape=(IMG_SIZE, IMG_SIZE, 3))
+inputs = layers.Input(shape=(IMG_HEIGHT, IMG_WIDTH, 3))
 augmented = data_augmentation(inputs)
 base_model = EfficientNetB0(include_top=False, weights='imagenet', input_tensor=augmented)
 
@@ -118,14 +119,14 @@ base_model.trainable = False
 # 2. Add our own pooling and classification layer for 2 classes
 x = layers.GlobalAveragePooling2D()(base_model.output)
 x = layers.Dropout(0.5)(x)
-outputs = layers.Dense(NUM_CLASSES, activation='softmax', dtype='float32')(x)
+outputs = layers.Dense(1, activation='sigmoid', dtype='float32')(x)
 
 model = tf.keras.Model(inputs, outputs)
 
 model.compile(
     optimizer='adam',
-    loss='sparse_categorical_crossentropy',
-    metrics=['accuracy'],
+    loss='binary_crossentropy',
+    metrics=['accuracy', tf.keras.metrics.AUC(name='auc')],
 )
 
 model.summary()
@@ -143,10 +144,10 @@ else:
     print('No previous latest weights found. Starting fresh run.')
 
 callbacks = [
-    ModelCheckpoint(filepath=str(checkpoint_path), monitor='val_loss', save_best_only=True),
+    ModelCheckpoint(filepath=str(checkpoint_path), monitor='val_auc', mode='max', save_best_only=True),
     ModelCheckpoint(filepath=str(latest_weights_path), save_weights_only=True, save_best_only=False),
     ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=3),
-    EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True),
+    EarlyStopping(monitor='val_auc', mode='max', patience=5, restore_best_weights=True),
     CSVLogger(filename=str(history_path), append=True),
 ]
 
@@ -179,8 +180,8 @@ for layer in base_model.layers:
 # 2. Recompile with a VERY low learning rate (e.g., 1e-5)
 model.compile(
     optimizer=tf.keras.optimizers.Adam(learning_rate=1e-5),
-    loss='sparse_categorical_crossentropy',
-    metrics=['accuracy'],
+    loss='binary_crossentropy',
+    metrics=['accuracy', tf.keras.metrics.AUC(name='auc')],
 )
 
 model.summary()
@@ -207,13 +208,13 @@ print('Saved fine-tuned model:', final_finetuned_path)
 
 # Evaluate and export predictions
 test_loss, test_accuracy = model.evaluate(test_dataset, verbose=1)
-probabilities = model.predict(test_dataset, verbose=1)
-predicted_label = probabilities.argmax(axis=1)
+probabilities = model.predict(test_dataset, verbose=1).flatten()
+predicted_label = (probabilities > 0.5).astype(int)
 
 test_results_df = test_split_df.copy()
 test_results_df['predicted_label'] = predicted_label
-test_results_df['prob_poor'] = probabilities[:, 0]
-test_results_df['prob_good'] = probabilities[:, 1]
+test_results_df['prob_poor'] = 1.0 - probabilities
+test_results_df['prob_good'] = probabilities
 
 metrics_path = MODEL_OUTPUT_ROOT / f'test_metrics_{TRAINING_MODALITY}.csv'
 predictions_path = MODEL_OUTPUT_ROOT / f'test_predictions_{TRAINING_MODALITY}.csv'

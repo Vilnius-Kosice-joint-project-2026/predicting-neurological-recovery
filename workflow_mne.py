@@ -1092,13 +1092,20 @@ if PREFERRED_PATIENTS:
         and (PREFERRED_SEGMENT_ID is None or record.segment_id == PREFERRED_SEGMENT_ID)
     ]
 else:
-    selected_examples = select_static_examples(
-        records=all_records,
-        signal_types=INCLUDED_SIGNAL_TYPES,
-        max_examples_per_type=MAX_EXAMPLES_PER_TYPE,
-        preferred_patients=PREFERRED_PATIENTS,
-        preferred_segment_id=PREFERRED_SEGMENT_ID,
-    )
+    from collections import defaultdict
+    patient_to_records = defaultdict(list)
+    
+    # Filter by EEG and group by patient
+    for record in all_records:
+        if record.signal_type in INCLUDED_SIGNAL_TYPES:
+            patient_to_records[record.patient_id].append(record)
+            
+    selected_examples = []
+    for pid, records in patient_to_records.items():
+        # Sort by hour_token numerically
+        records.sort(key=lambda r: int(r.hour_token))
+        # Keep only the final 2 hours
+        selected_examples.extend(records[-2:])
 
 print(f"\nSelected static examples: {len(selected_examples)}")
 selected_patient_ids = sorted({record.patient_id for record in selected_examples})
@@ -1303,7 +1310,7 @@ for segment_token, channel_map in segment_spectrograms_by_channel.items():
         file_path = patient_dir / filename
 
         img_u8 = to_uint8_image(spec)
-        Image.fromarray(img_u8, mode="RGB").save(file_path)
+        Image.fromarray(img_u8, mode="L").convert("RGB").save(file_path)
 
         rows.append(
             {
