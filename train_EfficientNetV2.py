@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from PIL import Image
 from sklearn.model_selection import train_test_split
 
 
@@ -116,15 +117,15 @@ from sklearn.utils import shuffle
 def build_image_dataframe(
     patient_dataframe: pd.DataFrame, image_root_path: Path
 ) -> pd.DataFrame:
-    """Expand patient-level labels into per-image samples.
+    """Expand patient-level labels into per-segment samples.
 
     Args:
         patient_dataframe: Patient-level dataframe with `Patient` and `Outcome`.
         image_root_path: Root folder that contains one folder per patient.
 
     Returns:
-        A dataframe with one row per image and columns for patient id, outcome,
-        filepath, and numeric label.
+        A dataframe with one row per EEG segment and columns for patient id,
+        outcome, segment token, channel file paths, and numeric label.
     """
     label_map = {"Poor": 0, "Good": 1}
     image_records: list[dict[str, object]] = []
@@ -139,12 +140,23 @@ def build_image_dataframe(
         if not patient_image_folder.is_dir():
             continue
 
+        segment_to_paths: dict[str, list[Path]] = {}
         for image_path in sorted(patient_image_folder.glob("*.png")):
+            filename_parts = image_path.stem.split("_EEG__", maxsplit=1)
+            if len(filename_parts) != 2:
+                continue
+            segment_token = filename_parts[0]
+            segment_to_paths.setdefault(segment_token, []).append(image_path)
+
+        for segment_token, segment_image_paths in sorted(segment_to_paths.items()):
+            if len(segment_image_paths) != 18:
+                continue
             image_records.append(
                 {
                     "Patient": patient_id,
                     "Outcome": outcome,
-                    "filepath": image_path,
+                    "segment_token": segment_token,
+                    "image_paths": segment_image_paths,
                     "label": label_map[outcome],
                 }
             )
@@ -152,13 +164,93 @@ def build_image_dataframe(
     image_dataframe = pd.DataFrame.from_records(image_records)
     if not image_dataframe.empty:
         image_dataframe = image_dataframe.sort_values(
-            ["Patient", "filepath"]
+            ["Patient", "segment_token"]
         ).reset_index(drop=True)
     return image_dataframe
 
 
+def create_grid_stitched_image(image_paths: list[Path], output_path: Path) -> None:
+    """Create a 3x6 stitched PNG from 18 single-channel images.
+
+    Args:
+        image_paths: Ordered list of 18 grayscale PNG paths for one segment.
+        output_path: Output PNG path for the stitched grid image.
+
+    Raises:
+        ValueError: If the input count is not 18 or image shapes are inconsistent.
+        OSError: If any image cannot be read or output cannot be written.
+    """
+    if len(image_paths) != 18:
+        raise ValueError(
+            f"Expected exactly 18 channel images, got {len(image_paths)}."
+        )
+
+    grayscale_images: list[np.ndarray] = []
+    expected_shape: tuple[int, int] | None = None
+
+    for image_path in image_paths:
+        channel_array = np.asarray(Image.open(image_path).convert("L"), dtype=np.uint8)
+        if expected_shape is None:
+            expected_shape = channel_array.shape
+        elif channel_array.shape != expected_shape:
+            raise ValueError(
+                "All channel images must have the same shape for stitching."
+            )
+        grayscale_images.append(channel_array)
+
+    stitched_rows: list[np.ndarray] = []
+    for row_index in range(3):
+        row_start = row_index * 6
+        row_end = row_start + 6
+        stitched_rows.append(np.hstack(grayscale_images[row_start:row_end]))
+
+    stitched_grid = np.vstack(stitched_rows)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.fromarray(stitched_grid, mode="RGB").save(output_path)
+
+
+
+def materialize_segment_artifacts(
+    segment_dataframe: pd.DataFrame,
+    stitched_root_path: Path,
+    image_root_path: Path,
+) -> pd.DataFrame:
+    """Create stitched PNG artifacts for each segment row.
+
+    Args:
+        segment_dataframe: Dataframe with `Patient`, `segment_token`, and `image_paths`.
+        stitched_root_path: Root directory where stitched grid PNG files are written.
+        image_root_path: Root image directory used for portable relative paths.
+
+    Returns:
+        A copy of the dataframe with grid absolute and relative paths.
+    """
+    prepared_dataframe = segment_dataframe.copy()
+    grid_paths: list[Path] = []
+
+    for _, segment_row in prepared_dataframe.iterrows():
+        patient_id = str(segment_row["Patient"])
+        segment_token = str(segment_row["segment_token"])
+        image_paths = [Path(path_value) for path_value in segment_row["image_paths"]]
+
+        stitched_output_path = (
+            stitched_root_path / patient_id / f"grid_stitched_{segment_token}.png"
+        )
+
+        create_grid_stitched_image(image_paths, stitched_output_path)
+
+        grid_paths.append(stitched_output_path)
+
+    prepared_dataframe["grid_path"] = grid_paths
+    prepared_dataframe["grid_relative_path"] = prepared_dataframe["grid_path"].map(
+        lambda path_value: str(Path(path_value).relative_to(image_root_path.parent.parent))
+    )
+    return prepared_dataframe
+
+
 # get all folder names in the training directory exports\mel_360x360\train
 training_images_root = Path("exports") / "mel_360x360" / "train"
+stitched_export_root = Path("exports") / "mel_stitched"
 training_image_folders = sorted(training_images_root.iterdir())
 print(f"Found {len(training_image_folders)} image folders in {training_images_root}")
 
@@ -210,6 +302,22 @@ test_image_dataframe = build_image_dataframe(
     test_df_with_images.drop_duplicates(subset=["Patient"]), training_images_root
 )
 
+train_image_dataframe = materialize_segment_artifacts(
+    train_image_dataframe,
+    stitched_root_path=stitched_export_root,
+    image_root_path=training_images_root,
+)
+val_image_dataframe = materialize_segment_artifacts(
+    val_image_dataframe,
+    stitched_root_path=stitched_export_root,
+    image_root_path=training_images_root,
+)
+test_image_dataframe = materialize_segment_artifacts(
+    test_image_dataframe,
+    stitched_root_path=stitched_export_root,
+    image_root_path=training_images_root,
+)
+
 print("Train patients:", train_patient_df.shape[0])
 print("Validation patients:", val_patient_df.shape[0])
 print(
@@ -236,16 +344,21 @@ print(
 def to_relative_paths(
     image_dataframe: pd.DataFrame, image_root_path: Path
 ) -> pd.DataFrame:
-    """Convert absolute file paths to relative paths for cross-platform portability.
+    """Convert absolute segment file paths to relative paths for portability.
     Args:
-        image_dataframe: Dataframe containing a `filepath` column.
+        image_dataframe: Dataframe containing an `image_paths` column.
         image_root_path: Root folder used to create relative image paths.
     Returns:
         A copy of the dataframe with portable relative paths.
     """
     portable_dataframe = image_dataframe.copy()
-    portable_dataframe["relative_path"] = portable_dataframe["filepath"].map(
-        lambda path_value: str(Path(path_value).relative_to(image_root_path))
+    portable_dataframe["relative_paths"] = portable_dataframe["image_paths"].map(
+        lambda path_list: [
+            str(Path(path_value).relative_to(image_root_path)) for path_value in path_list
+        ]
+    )
+    portable_dataframe["relative_path"] = portable_dataframe["relative_paths"].map(
+        lambda path_list: "|".join(path_list)
     )
     return portable_dataframe
 
@@ -257,7 +370,12 @@ train_artifact_df = to_relative_paths(train_image_dataframe, training_images_roo
 val_artifact_df = to_relative_paths(val_image_dataframe, training_images_root)
 test_artifact_df = to_relative_paths(test_image_dataframe, training_images_root)
 
-artifact_columns = ["Patient", "Outcome", "label", "relative_path"]
+artifact_columns = [
+    "Patient",
+    "Outcome",
+    "label",
+    "grid_relative_path",
+]
 train_artifact_df[artifact_columns].to_parquet(
     artifact_root / "train_split.parquet", index=False
 )
@@ -270,7 +388,6 @@ test_artifact_df[artifact_columns].to_parquet(
 
 print(f"Saved split artifacts to {artifact_root.resolve()}")
 
-# Local prep notebook: training has been moved to a dedicated Colab notebook.
 # This cell keeps a quick integrity check before upload to Google Drive.
 artifact_root = Path("artifacts") / "splits"
 
@@ -301,8 +418,6 @@ print("train/val overlap:", len(train_patients & val_patients))
 print("train/test overlap:", len(train_patients & test_patients))
 print("val/test overlap:", len(val_patients & test_patients))
 
-# Intentionally left as local-prep completion marker.
-# Use train_EfficientNetV2_colab.ipynb for training, evaluation, and model saving.
 print(
     "Local preparation complete. Upload artifacts/splits/*.parquet and images to Google Drive for Colab training."
 )

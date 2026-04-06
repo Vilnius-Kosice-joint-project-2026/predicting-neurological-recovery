@@ -16,14 +16,12 @@ import scipy.io
 from matplotlib.axes import Axes
 from PIL import Image
 
-# Static exploration settings
 DATA_ROOT = Path("icare_data/training")
 INCLUDED_SIGNAL_TYPES = ("EEG",)
 MAX_EXAMPLES_PER_TYPE = 9999
 PREFERRED_PATIENTS: set[str] = set()  # Example: {"0676", "0690", "0651"}
 PREFERRED_SEGMENT_ID: Optional[str] = None  # Example: "002"
 
-PREPROCESS_MODE = "bipolar"  # Options: "monopolar", "bipolar"
 TARGET_SAMPLING_RATE_HZ = 128.0
 
 ENABLE_BANDPASS_FILTER = True
@@ -377,7 +375,9 @@ def standardize_to_19_channels(
     canonical_index = {name: idx for idx, name in enumerate(CANONICAL_19_ORDER)}
     normalized_names = [normalize_channel_label(name) for name in channel_names]
 
-    standardized = np.full((len(CANONICAL_19_ORDER), signal_uv.shape[1]), np.nan, dtype=float)
+    standardized = np.full(
+        (len(CANONICAL_19_ORDER), signal_uv.shape[1]), np.nan, dtype=float
+    )
     unknown_channels: list[str] = []
     duplicate_canonical: list[str] = []
 
@@ -396,9 +396,7 @@ def standardize_to_19_channels(
         seen.add(channel_name)
 
     missing_channels = [
-        channel_name
-        for channel_name in CANONICAL_19_ORDER
-        if channel_name not in seen
+        channel_name for channel_name in CANONICAL_19_ORDER if channel_name not in seen
     ]
 
     diagnostics = {
@@ -426,11 +424,20 @@ def to_bipolar_18_mne(
         sfreq=float(sampling_rate_hz),
         ch_types=["eeg"] * len(CANONICAL_19_ORDER),
     )
-    raw = mne.io.RawArray(standardized_monopolar_uv.astype(float), info, verbose="ERROR")
+    raw = mne.io.RawArray(
+        standardized_monopolar_uv.astype(float), info, verbose="ERROR"
+    )
 
     missing_mask = np.array(
         [
-            bool(np.isnan(standardized_monopolar_uv[CANONICAL_19_ORDER.index(left)]).all() or np.isnan(standardized_monopolar_uv[CANONICAL_19_ORDER.index(right)]).all())
+            bool(
+                np.isnan(
+                    standardized_monopolar_uv[CANONICAL_19_ORDER.index(left)]
+                ).all()
+                or np.isnan(
+                    standardized_monopolar_uv[CANONICAL_19_ORDER.index(right)]
+                ).all()
+            )
             for left, right in BIPOLAR_18_PAIRS
         ],
         dtype=bool,
@@ -583,7 +590,9 @@ def plot_stacked_channels(
 
     for channel_idx, channel_name in enumerate(channel_names):
         offset = (n_channels - 1 - channel_idx) * spacing_uv
-        axis.plot(time_axis, clipped[channel_idx] + offset, color="black", linewidth=0.6)
+        axis.plot(
+            time_axis, clipped[channel_idx] + offset, color="black", linewidth=0.6
+        )
 
     y_ticks = [(n_channels - 1 - idx) * spacing_uv for idx in range(n_channels)]
     axis.set_yticks(y_ticks)
@@ -600,35 +609,22 @@ def plot_stacked_channels(
         plt.tight_layout()
         plt.show()
 
+
 def _fill_nan_1d(signal_1d: np.ndarray) -> tuple[np.ndarray, int]:
-    """Replace NaN/inf values in a 1D signal using linear interpolation.
-
-    Args:
-        signal_1d: One-dimensional signal array.
-
-    Returns:
-        Tuple with cleaned signal and count of replaced samples.
-
-    Raises:
-        ValueError: If no finite values exist.
-    """
-    if signal_1d.ndim != 1:
-        raise ValueError(f"Expected 1D input, got shape {signal_1d.shape}.")
-
     finite_mask = np.isfinite(signal_1d)
     replaced_count = int((~finite_mask).sum())
+    
     if replaced_count == 0:
         return signal_1d.astype(float, copy=True), 0
-    if not finite_mask.any():
-        raise ValueError("Signal contains no finite values.")
-
+        
     signal_clean = signal_1d.astype(float, copy=True)
-    sample_index = np.arange(signal_clean.size, dtype=float)
-    signal_clean[~finite_mask] = np.interp(
-        sample_index[~finite_mask],
-        sample_index[finite_mask],
-        signal_clean[finite_mask],
-    )
+    
+    # If the whole channel is dead, return zeros (which map to -80dB later)
+    if not finite_mask.any():
+        return np.zeros_like(signal_clean), replaced_count
+        
+    # Replace flat zeros / artifacts with 0.0 to simulate silence
+    signal_clean[~finite_mask] = 0.0
     return signal_clean, replaced_count
 
 
@@ -651,9 +647,7 @@ def _enforce_spectrogram_shape(
         ValueError: If input is not 2D or target shape is invalid.
     """
     if spectrogram_2d.ndim != 2:
-        raise ValueError(
-            f"Spectrogram must be 2D, got shape {spectrogram_2d.shape}."
-        )
+        raise ValueError(f"Spectrogram must be 2D, got shape {spectrogram_2d.shape}.")
     target_freq_bins, target_time_steps = target_shape
     if target_freq_bins <= 0 or target_time_steps <= 0:
         raise ValueError(f"Invalid target shape: {target_shape}.")
@@ -767,9 +761,7 @@ def create_bipolar_mel_spectrograms(
             pad_value=pad_value,
         )
         if mel_fixed.shape != (n_mels, expected_time_steps):
-            raise ValueError(
-                f"Unexpected shape for {channel_name}: {mel_fixed.shape}."
-            )
+            raise ValueError(f"Unexpected shape for {channel_name}: {mel_fixed.shape}.")
 
         by_channel[channel_name] = mel_fixed
         stacked_list.append(mel_fixed)
@@ -808,7 +800,9 @@ def _mne_info_for_signal(
     metadata: dict[str, object],
 ) -> mne.Info:
     """Build an MNE Info object for a channel-major EEG array."""
-    channel_names = list(metadata["channel_names"] if "channel_names" in metadata else [])
+    channel_names = list(
+        metadata["channel_names"] if "channel_names" in metadata else []
+    )
     if len(channel_names) != signal_uv.shape[0]:
         channel_names = [f"EEG {index:02d}" for index in range(signal_uv.shape[0])]
 
@@ -956,7 +950,9 @@ def mask_flat_zero_windows(
 ) -> tuple[np.ndarray, dict[str, object]]:
     """Mask 10-second flat-zero-like windows so they are excluded before mel creation."""
     if signal_uv.ndim != 2:
-        raise ValueError(f"Expected channel-major 2D signal, got shape {signal_uv.shape}.")
+        raise ValueError(
+            f"Expected channel-major 2D signal, got shape {signal_uv.shape}."
+        )
 
     sampling_rate_hz = float(metadata.get("sampling_rate_hz", np.nan))
     if not np.isfinite(sampling_rate_hz) or sampling_rate_hz <= 0:
@@ -977,9 +973,7 @@ def mask_flat_zero_windows(
     n_channels, n_samples = signal_uv.shape
     window_size_samples = int(round(window_seconds * sampling_rate_hz))
     if window_size_samples <= 0:
-        raise ValueError(
-            f"Computed invalid window_size_samples={window_size_samples}."
-        )
+        raise ValueError(f"Computed invalid window_size_samples={window_size_samples}.")
 
     n_full_windows = n_samples // window_size_samples
     if n_full_windows == 0:
@@ -1023,9 +1017,13 @@ def mask_flat_zero_windows(
 
         channel_window_flat[:, window_index] = np.array(per_channel_flat, dtype=bool)
         if require_all_channels_flat:
-            window_flat[window_index] = bool(np.all(channel_window_flat[:, window_index]))
+            window_flat[window_index] = bool(
+                np.all(channel_window_flat[:, window_index])
+            )
         else:
-            window_flat[window_index] = bool(np.any(channel_window_flat[:, window_index]))
+            window_flat[window_index] = bool(
+                np.any(channel_window_flat[:, window_index])
+            )
 
     candidate_runs = _find_true_runs(window_flat)
     kept_runs = [
@@ -1051,7 +1049,9 @@ def mask_flat_zero_windows(
         "flat_zero_min_consecutive_windows": int(min_consecutive_windows),
         "flat_zero_require_all_channels_flat": bool(require_all_channels_flat),
         "flat_zero_total_windows_checked": int(n_full_windows),
-        "flat_zero_candidate_window_indices": np.flatnonzero(window_flat).astype(int).tolist(),
+        "flat_zero_candidate_window_indices": np.flatnonzero(window_flat)
+        .astype(int)
+        .tolist(),
         "flat_zero_kept_window_indices": sorted(
             {
                 window_index
@@ -1074,6 +1074,7 @@ def mask_flat_zero_windows(
         "flat_zero_policy": "mask_to_nan",
     }
     return masked_signal_uv, diagnostics
+
 
 all_records = discover_icare_segments(DATA_ROOT)
 print(f"Discovered paired segments: {len(all_records)}")
@@ -1109,7 +1110,7 @@ for record in selected_examples[:10]:
 if len(selected_examples) > 10:
     print(f"  ... and {len(selected_examples) - 10} more")
 
-print(f"\nPreprocessing mode: {PREPROCESS_MODE}")
+print(f"\nPreprocessing mode: bipolar")
 print(
     f"Target sampling rate={TARGET_SAMPLING_RATE_HZ}Hz | "
     f"Band-pass filter enabled={ENABLE_BANDPASS_FILTER} "
@@ -1142,54 +1143,51 @@ for record in selected_examples:
     try:
         signal_uv, metadata = load_icare_segment(record.hea_path, record.mat_path)
 
-        if PREPROCESS_MODE == "bipolar":
-            signal_uv, metadata = prepare_bipolar_segment(signal_uv, metadata)
+        signal_uv, metadata = prepare_bipolar_segment(signal_uv, metadata)
 
-            if list(metadata["channel_names"]) != expected_bipolar_channel_names:
-                raise ValueError(
-                    "Bipolar channel order mismatch. "
-                    f"Expected {expected_bipolar_channel_names} but got {metadata['channel_names']}."
-                )
+        if list(metadata["channel_names"]) != expected_bipolar_channel_names:
+            raise ValueError(
+                "Bipolar channel order mismatch. "
+                f"Expected {expected_bipolar_channel_names} but got {metadata['channel_names']}."
+            )
 
-            pre_filter_signal_uv = signal_uv.copy()
-            post_filter_signal_uv = signal_uv.copy()
+        pre_filter_signal_uv = signal_uv.copy()
+        post_filter_signal_uv = signal_uv.copy()
 
-            if ENABLE_BANDPASS_FILTER:
-                post_filter_signal_uv, filter_diagnostics = apply_bandpass_butterworth(
-                    signal_uv=signal_uv,
-                    sampling_rate_hz=float(metadata["sampling_rate_hz"]),
-                    low_cut_hz=FILTER_LOW_HZ,
-                    high_cut_hz=FILTER_HIGH_HZ,
-                    order=FILTER_ORDER,
-                )
-                metadata["filter_diagnostics"] = filter_diagnostics
+        if ENABLE_BANDPASS_FILTER:
+            post_filter_signal_uv, filter_diagnostics = apply_bandpass_butterworth(
+                signal_uv=signal_uv,
+                sampling_rate_hz=float(metadata["sampling_rate_hz"]),
+                low_cut_hz=FILTER_LOW_HZ,
+                high_cut_hz=FILTER_HIGH_HZ,
+                order=FILTER_ORDER,
+            )
+            metadata["filter_diagnostics"] = filter_diagnostics
 
-            signal_uv = post_filter_signal_uv if ENABLE_BANDPASS_FILTER else pre_filter_signal_uv
-            signal_uv, metadata = resample_to_target_hz(
+        signal_uv = (
+            post_filter_signal_uv
+            if ENABLE_BANDPASS_FILTER
+            else pre_filter_signal_uv
+        )
+        signal_uv, metadata = resample_to_target_hz(
+            signal_uv=signal_uv,
+            metadata=metadata,
+            target_sampling_rate_hz=TARGET_SAMPLING_RATE_HZ,
+        )
+
+        if ENABLE_FLAT_ZERO_ELIMINATION:
+            signal_uv, flat_zero_diagnostics = mask_flat_zero_windows(
                 signal_uv=signal_uv,
                 metadata=metadata,
-                target_sampling_rate_hz=TARGET_SAMPLING_RATE_HZ,
+                window_seconds=FLAT_ZERO_WINDOW_SECONDS,
+                zero_abs_tolerance_uv=FLAT_ZERO_ABS_TOLERANCE_UV,
+                min_consecutive_windows=FLAT_ZERO_MIN_CONSECUTIVE_WINDOWS,
+                require_all_channels_flat=FLAT_ZERO_REQUIRE_ALL_CHANNELS_FLAT,
             )
+            metadata["flat_zero_diagnostics"] = flat_zero_diagnostics
 
-            if ENABLE_FLAT_ZERO_ELIMINATION:
-                signal_uv, flat_zero_diagnostics = mask_flat_zero_windows(
-                    signal_uv=signal_uv,
-                    metadata=metadata,
-                    window_seconds=FLAT_ZERO_WINDOW_SECONDS,
-                    zero_abs_tolerance_uv=FLAT_ZERO_ABS_TOLERANCE_UV,
-                    min_consecutive_windows=FLAT_ZERO_MIN_CONSECUTIVE_WINDOWS,
-                    require_all_channels_flat=FLAT_ZERO_REQUIRE_ALL_CHANNELS_FLAT,
-                )
-                metadata["flat_zero_diagnostics"] = flat_zero_diagnostics
 
-        elif PREPROCESS_MODE != "monopolar":
-            raise ValueError(
-                f"Unsupported PREPROCESS_MODE={PREPROCESS_MODE}. Use 'monopolar' or 'bipolar'."
-            )
-
-        segment_token = (
-            f"{record.patient_id}_{record.segment_id}_{record.hour_token}_{record.signal_type}"
-        )
+        segment_token = f"{record.patient_id}_{record.segment_id}_{record.hour_token}_{record.signal_type}"
 
         if ENABLE_MEL_SPECTROGRAM:
             spectrograms_by_channel, spectrogram_tensor, spectrogram_diagnostics = (
@@ -1252,7 +1250,6 @@ for record in selected_examples:
                 f"masked_fraction={diagnostics['flat_zero_masked_fraction']:.4f}"
             )
 
-        
         n_channels = pre_filter_signal_uv.shape[0]
 
     except Exception as error:
@@ -1306,17 +1303,21 @@ for segment_token, channel_map in segment_spectrograms_by_channel.items():
         file_path = patient_dir / filename
 
         img_u8 = to_uint8_image(spec)
-        Image.fromarray(img_u8, mode="L").save(file_path)
+        Image.fromarray(img_u8, mode="RGB").save(file_path)
 
-        rows.append({
-            "image_path": str(file_path.as_posix()),
-            "image_path_relative": str(file_path.relative_to(output_dir).as_posix()),
-            "patient_id": patient_id,
-            "segment_token": segment_token,
-            "channel_name": channel_name,
-            "height": 360,
-            "width": 360,
-        })
+        rows.append(
+            {
+                "image_path": str(file_path.as_posix()),
+                "image_path_relative": str(
+                    file_path.relative_to(output_dir).as_posix()
+                ),
+                "patient_id": patient_id,
+                "segment_token": segment_token,
+                "channel_name": channel_name,
+                "height": 360,
+                "width": 360,
+            }
+        )
         num_saved += 1
         saved_by_patient[patient_id] = saved_by_patient.get(patient_id, 0) + 1
 
