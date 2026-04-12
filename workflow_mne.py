@@ -16,6 +16,9 @@ import scipy.io
 from matplotlib.axes import Axes
 from PIL import Image
 
+import concurrent.futures
+from tqdm import tqdm
+
 DATA_ROOT = Path("icare_data/training")
 INCLUDED_SIGNAL_TYPES = ("EEG",)
 MAX_EXAMPLES_PER_TYPE = 9999
@@ -1075,276 +1078,198 @@ def mask_flat_zero_windows(
     }
     return masked_signal_uv, diagnostics
 
+def to_uint8_image(spec_2d: np.ndarray) -> np.ndarray:
+        spec = spec_2d.astype(np.float32)
+        if PER_IMAGE_NORMALIZE:
+            vmin = float(np.nanmin(spec))
+            vmax = float(np.nanmax(spec))
+            if not np.isfinite(vmin) or not np.isfinite(vmax) or vmax <= vmin:
+                scaled = np.zeros_like(spec, dtype=np.float32)
+            else:
+                scaled = (spec - vmin) / (vmax - vmin)
+        else:
+            clipped = np.clip(spec, DB_MIN, DB_MAX)
+            scaled = (clipped - DB_MIN) / (DB_MAX - DB_MIN)
 
-all_records = discover_icare_segments(DATA_ROOT)
-print(f"Discovered paired segments: {len(all_records)}")
+        img = (scaled * 255.0).clip(0, 255).astype(np.uint8)
+        return img
 
-for signal_type in INCLUDED_SIGNAL_TYPES:
-    count = sum(record.signal_type == signal_type for record in all_records)
-    print(f"  {signal_type}: {count}")
-
-if PREFERRED_PATIENTS:
-    selected_examples = [
-        record
-        for record in all_records
-        if record.signal_type in INCLUDED_SIGNAL_TYPES
-        and record.patient_id in PREFERRED_PATIENTS
-        and (PREFERRED_SEGMENT_ID is None or record.segment_id == PREFERRED_SEGMENT_ID)
-    ]
-else:
-    from collections import defaultdict
-    patient_to_records = defaultdict(list)
+def process_and_save_segment(record: SegmentRecord) -> list[dict]:
+    """Processes a single EEG segment, saves PNGs to disk, and returns manifest rows."""
+    output_dir = EXPORT_ROOT / EXPORT_SPLIT
+    patient_dir = output_dir / record.patient_id
+    patient_dir.mkdir(parents=True, exist_ok=True)
     
-    # Filter by EEG and group by patient
-    for record in all_records:
-        if record.signal_type in INCLUDED_SIGNAL_TYPES:
-            patient_to_records[record.patient_id].append(record)
-            
-    selected_examples = []
-    for pid, records in patient_to_records.items():
-        # Sort by hour_token numerically
-        records.sort(key=lambda r: int(r.hour_token))
-        # Keep only the final 2 hours
-        selected_examples.extend(records[-2:])
-
-print(f"\nSelected static examples: {len(selected_examples)}")
-selected_patient_ids = sorted({record.patient_id for record in selected_examples})
-print(f"Selected patients: {selected_patient_ids if selected_patient_ids else 'None'}")
-for record in selected_examples[:10]:
-    print(
-        f"  {record.patient_id}_{record.segment_id}_{record.hour_token}_{record.signal_type}"
-    )
-if len(selected_examples) > 10:
-    print(f"  ... and {len(selected_examples) - 10} more")
-
-print(f"\nPreprocessing mode: bipolar")
-print(
-    f"Target sampling rate={TARGET_SAMPLING_RATE_HZ}Hz | "
-    f"Band-pass filter enabled={ENABLE_BANDPASS_FILTER} "
-    f"(order={FILTER_ORDER}, low={FILTER_LOW_HZ}Hz, high={FILTER_HIGH_HZ}Hz)"
-)
-print(
-    f"Flat-zero elimination enabled={ENABLE_FLAT_ZERO_ELIMINATION} | "
-    f"window={FLAT_ZERO_WINDOW_SECONDS}s | "
-    f"tol={FLAT_ZERO_ABS_TOLERANCE_UV}uV | "
-    f"min_consecutive={FLAT_ZERO_MIN_CONSECUTIVE_WINDOWS} | "
-    f"all_channels={FLAT_ZERO_REQUIRE_ALL_CHANNELS_FLAT}"
-)
-print(
-    f"Mel enabled={ENABLE_MEL_SPECTROGRAM} | mel_bins={MEL_N_MELS} | "
-    f"hop={MEL_HOP_SECONDS}s | f_range=[{MEL_F_MIN_HZ}, {MEL_F_MAX_HZ}]Hz | "
-    f"target_shape=({MEL_N_MELS}, {MEL_EXPECTED_TIME_STEPS})"
-)
-
-if not selected_examples:
-    print("No examples selected. Adjust filters in the previous cell.")
-
-expected_bipolar_channel_names = [f"{left}-{right}" for left, right in BIPOLAR_18_PAIRS]
-segment_spectrograms_by_channel: dict[str, dict[str, np.ndarray]] = {}
-segment_spectrogram_tensors: dict[str, np.ndarray] = {}
-
-for record in selected_examples:
-    print("\n" + "=" * 100)
-    print(f"Loading {record.hea_path.name}")
-
+    segment_token = f"{record.patient_id}_{record.segment_id}_{record.hour_token}_{record.signal_type}"
+    expected_bipolar_channel_names = [f"{left}-{right}" for left, right in BIPOLAR_18_PAIRS]
+    
+    manifest_rows = []
+    
     try:
+        # 1. Load and prepare
         signal_uv, metadata = load_icare_segment(record.hea_path, record.mat_path)
-
         signal_uv, metadata = prepare_bipolar_segment(signal_uv, metadata)
-
-        if list(metadata["channel_names"]) != expected_bipolar_channel_names:
-            raise ValueError(
-                "Bipolar channel order mismatch. "
-                f"Expected {expected_bipolar_channel_names} but got {metadata['channel_names']}."
-            )
-
-        pre_filter_signal_uv = signal_uv.copy()
-        post_filter_signal_uv = signal_uv.copy()
-
+        
+        # 2. Filter & Resample
         if ENABLE_BANDPASS_FILTER:
-            post_filter_signal_uv, filter_diagnostics = apply_bandpass_butterworth(
-                signal_uv=signal_uv,
-                sampling_rate_hz=float(metadata["sampling_rate_hz"]),
-                low_cut_hz=FILTER_LOW_HZ,
-                high_cut_hz=FILTER_HIGH_HZ,
-                order=FILTER_ORDER,
+            signal_uv, _ = apply_bandpass_butterworth(
+                signal_uv, float(metadata["sampling_rate_hz"]), 
+                FILTER_LOW_HZ, FILTER_HIGH_HZ, FILTER_ORDER
             )
-            metadata["filter_diagnostics"] = filter_diagnostics
-
-        signal_uv = (
-            post_filter_signal_uv
-            if ENABLE_BANDPASS_FILTER
-            else pre_filter_signal_uv
-        )
+        
         signal_uv, metadata = resample_to_target_hz(
+            signal_uv, metadata, TARGET_SAMPLING_RATE_HZ
+        )
+
+        # 3. Flat Zero
+        if ENABLE_FLAT_ZERO_ELIMINATION:
+            signal_uv, _ = mask_flat_zero_windows(
+                signal_uv, metadata, 
+                FLAT_ZERO_WINDOW_SECONDS, FLAT_ZERO_ABS_TOLERANCE_UV, 
+                FLAT_ZERO_MIN_CONSECUTIVE_WINDOWS, FLAT_ZERO_REQUIRE_ALL_CHANNELS_FLAT
+            )
+
+        # 4. Mel Spectrogram creation
+        spectrograms_by_channel, _, _ = create_bipolar_mel_spectrograms(
             signal_uv=signal_uv,
             metadata=metadata,
-            target_sampling_rate_hz=TARGET_SAMPLING_RATE_HZ,
+            expected_channel_names=expected_bipolar_channel_names,
+            n_mels=MEL_N_MELS, n_fft=MEL_N_FFT, hop_seconds=MEL_HOP_SECONDS,
+            f_min_hz=MEL_F_MIN_HZ, f_max_hz=MEL_F_MAX_HZ,
+            expected_sampling_rate_hz=TARGET_SAMPLING_RATE_HZ,
+            expected_time_steps=MEL_EXPECTED_TIME_STEPS, pad_value=MEL_PAD_VALUE_DB,
         )
+        
+        # 5. IMMEDIATELY SAVE TO DISK AND FREE RAM
+        for channel_name, spec in spectrograms_by_channel.items():
+            if spec.shape != (360, 360):
+                continue
 
-        if ENABLE_FLAT_ZERO_ELIMINATION:
-            signal_uv, flat_zero_diagnostics = mask_flat_zero_windows(
-                signal_uv=signal_uv,
-                metadata=metadata,
-                window_seconds=FLAT_ZERO_WINDOW_SECONDS,
-                zero_abs_tolerance_uv=FLAT_ZERO_ABS_TOLERANCE_UV,
-                min_consecutive_windows=FLAT_ZERO_MIN_CONSECUTIVE_WINDOWS,
-                require_all_channels_flat=FLAT_ZERO_REQUIRE_ALL_CHANNELS_FLAT,
-            )
-            metadata["flat_zero_diagnostics"] = flat_zero_diagnostics
+            safe_channel = re.sub(r"[^A-Za-z0-9._-]", "-", channel_name)
+            filename = f"{segment_token}__{safe_channel}.png"
+            file_path = patient_dir / filename
 
+            img_u8 = to_uint8_image(spec)
+            Image.fromarray(img_u8, mode="L").convert("RGB").save(file_path)
 
-        segment_token = f"{record.patient_id}_{record.segment_id}_{record.hour_token}_{record.signal_type}"
-
-        if ENABLE_MEL_SPECTROGRAM:
-            spectrograms_by_channel, spectrogram_tensor, spectrogram_diagnostics = (
-                create_bipolar_mel_spectrograms(
-                    signal_uv=signal_uv,
-                    metadata=metadata,
-                    expected_channel_names=expected_bipolar_channel_names,
-                    n_mels=MEL_N_MELS,
-                    n_fft=MEL_N_FFT,
-                    hop_seconds=MEL_HOP_SECONDS,
-                    f_min_hz=MEL_F_MIN_HZ,
-                    f_max_hz=MEL_F_MAX_HZ,
-                    expected_sampling_rate_hz=TARGET_SAMPLING_RATE_HZ,
-                    expected_time_steps=MEL_EXPECTED_TIME_STEPS,
-                    pad_value=MEL_PAD_VALUE_DB,
-                )
-            )
-            metadata["spectrogram_diagnostics"] = spectrogram_diagnostics
-            segment_spectrograms_by_channel[segment_token] = spectrograms_by_channel
-            segment_spectrogram_tensors[segment_token] = spectrogram_tensor
-
-            first_channel_name = metadata["channel_names"][0]
-            first_channel_shape = spectrograms_by_channel[first_channel_name].shape
-            print(
-                "spectrogram="
-                f"channels={len(spectrograms_by_channel)} | "
-                f"sample_channel_shape={first_channel_shape} | "
-                f"stacked_shape={spectrogram_tensor.shape}"
-            )
-
-        summarize_segment(record, metadata)
-        if "resampling_diagnostics" in metadata:
-            diagnostics = metadata["resampling_diagnostics"]
-            print(
-                "resample="
-                f"{diagnostics['resample_method']} | "
-                f"source_fs={diagnostics['source_sampling_rate_hz']}Hz | "
-                f"target_fs={diagnostics['target_sampling_rate_hz']}Hz | "
-                f"source_samples={diagnostics['source_samples']} | "
-                f"target_samples={diagnostics['target_samples']}"
-            )
-        if "filter_diagnostics" in metadata:
-            diagnostics = metadata["filter_diagnostics"]
-            print(
-                "filter="
-                f"{diagnostics['filter_name']} | "
-                f"order={diagnostics['filter_order']} | "
-                f"band=[{diagnostics['filter_low_cut_hz']}, {diagnostics['filter_high_cut_hz']}] Hz | "
-                f"zero_phase={diagnostics['filter_zero_phase']} | "
-                f"filtered_channels={diagnostics['filtered_channels']}"
-            )
-        if "flat_zero_diagnostics" in metadata:
-            diagnostics = metadata["flat_zero_diagnostics"]
-            print(
-                "flat_zero="
-                f"windows_checked={diagnostics['flat_zero_total_windows_checked']} | "
-                f"candidates={len(diagnostics['flat_zero_candidate_window_indices'])} | "
-                f"kept={len(diagnostics['flat_zero_kept_window_indices'])} | "
-                f"masked_samples={diagnostics['flat_zero_masked_samples_total']} | "
-                f"masked_fraction={diagnostics['flat_zero_masked_fraction']:.4f}"
-            )
-
-        n_channels = pre_filter_signal_uv.shape[0]
-
-    except Exception as error:
-        print(
-            f"Failed for {record.patient_id}_{record.segment_id}_{record.signal_type}: {error}"
-        )
-
-output_dir = EXPORT_ROOT / EXPORT_SPLIT
-output_dir.mkdir(parents=True, exist_ok=True)
-
-manifest_path = output_dir / "manifest.csv"
-
-
-def to_uint8_image(spec_2d: np.ndarray) -> np.ndarray:
-    spec = spec_2d.astype(np.float32)
-    if PER_IMAGE_NORMALIZE:
-        vmin = float(np.nanmin(spec))
-        vmax = float(np.nanmax(spec))
-        if not np.isfinite(vmin) or not np.isfinite(vmax) or vmax <= vmin:
-            scaled = np.zeros_like(spec, dtype=np.float32)
-        else:
-            scaled = (spec - vmin) / (vmax - vmin)
-    else:
-        clipped = np.clip(spec, DB_MIN, DB_MAX)
-        scaled = (clipped - DB_MIN) / (DB_MAX - DB_MIN)
-
-    img = (scaled * 255.0).clip(0, 255).astype(np.uint8)
-    return img
-
-
-rows = []
-num_saved = 0
-saved_by_patient: dict[str, int] = {}
-
-# Uses your existing dictionary:
-# segment_spectrograms_by_channel[segment_token][channel_name] -> (360, 360)
-for segment_token, channel_map in segment_spectrograms_by_channel.items():
-    patient_id = segment_token.split("_", 1)[0]
-    if PREFERRED_PATIENTS and patient_id not in PREFERRED_PATIENTS:
-        continue
-
-    patient_dir = output_dir / patient_id
-    patient_dir.mkdir(parents=True, exist_ok=True)
-
-    for channel_name, spec in channel_map.items():
-        if spec.shape != (360, 360):
-            continue
-
-        safe_channel = re.sub(r"[^A-Za-z0-9._-]", "-", channel_name)
-        filename = f"{segment_token}__{safe_channel}.png"
-        file_path = patient_dir / filename
-
-        img_u8 = to_uint8_image(spec)
-        Image.fromarray(img_u8, mode="L").convert("RGB").save(file_path)
-
-        rows.append(
-            {
+            manifest_rows.append({
                 "image_path": str(file_path.as_posix()),
-                "image_path_relative": str(
-                    file_path.relative_to(output_dir).as_posix()
-                ),
-                "patient_id": patient_id,
+                "image_path_relative": str(file_path.relative_to(output_dir).as_posix()),
+                "patient_id": record.patient_id,
                 "segment_token": segment_token,
                 "channel_name": channel_name,
                 "height": 360,
                 "width": 360,
-            }
+            })
+            
+        print(f"Successfully processed and saved {segment_token}")
+
+    except Exception as error:
+        print(f"Failed for {segment_token}: {error}")
+
+    # Return the data needed for the CSV. The heavy arrays are now garbage collected!
+    return manifest_rows
+
+if __name__ == '__main__':
+    all_records = discover_icare_segments(DATA_ROOT)
+    print(f"Discovered paired segments: {len(all_records)}")
+
+    for signal_type in INCLUDED_SIGNAL_TYPES:
+        count = sum(record.signal_type == signal_type for record in all_records)
+        print(f"  {signal_type}: {count}")
+
+    if PREFERRED_PATIENTS:
+        selected_examples = [
+            record
+            for record in all_records
+            if record.signal_type in INCLUDED_SIGNAL_TYPES
+            and record.patient_id in PREFERRED_PATIENTS
+            and (PREFERRED_SEGMENT_ID is None or record.segment_id == PREFERRED_SEGMENT_ID)
+        ]
+    else:
+        from collections import defaultdict
+        patient_to_records = defaultdict(list)
+        
+        # Filter by EEG and group by patient
+        for record in all_records:
+            if record.signal_type in INCLUDED_SIGNAL_TYPES:
+                patient_to_records[record.patient_id].append(record)
+                
+        selected_examples = []
+        for pid, records in patient_to_records.items():
+            # Sort by hour_token numerically
+            records.sort(key=lambda r: int(r.hour_token))
+            # Keep only the final 2 hours
+            selected_examples.extend(records[-2:])
+
+    print(f"\nSelected static examples: {len(selected_examples)}")
+    selected_patient_ids = sorted({record.patient_id for record in selected_examples})
+    print(f"Selected patients: {selected_patient_ids if selected_patient_ids else 'None'}")
+    for record in selected_examples[:10]:
+        print(
+            f"  {record.patient_id}_{record.segment_id}_{record.hour_token}_{record.signal_type}"
         )
-        num_saved += 1
+    if len(selected_examples) > 10:
+        print(f"  ... and {len(selected_examples) - 10} more")
+
+    print(f"\nPreprocessing mode: bipolar")
+    print(
+        f"Target sampling rate={TARGET_SAMPLING_RATE_HZ}Hz | "
+        f"Band-pass filter enabled={ENABLE_BANDPASS_FILTER} "
+        f"(order={FILTER_ORDER}, low={FILTER_LOW_HZ}Hz, high={FILTER_HIGH_HZ}Hz)"
+    )
+    print(
+        f"Flat-zero elimination enabled={ENABLE_FLAT_ZERO_ELIMINATION} | "
+        f"window={FLAT_ZERO_WINDOW_SECONDS}s | "
+        f"tol={FLAT_ZERO_ABS_TOLERANCE_UV}uV | "
+        f"min_consecutive={FLAT_ZERO_MIN_CONSECUTIVE_WINDOWS} | "
+        f"all_channels={FLAT_ZERO_REQUIRE_ALL_CHANNELS_FLAT}"
+    )
+    print(
+        f"Mel enabled={ENABLE_MEL_SPECTROGRAM} | mel_bins={MEL_N_MELS} | "
+        f"hop={MEL_HOP_SECONDS}s | f_range=[{MEL_F_MIN_HZ}, {MEL_F_MAX_HZ}]Hz | "
+        f"target_shape=({MEL_N_MELS}, {MEL_EXPECTED_TIME_STEPS})"
+    )
+
+    if not selected_examples:
+        print("No examples selected. Adjust filters in the previous cell.")
+
+    output_dir = EXPORT_ROOT / EXPORT_SPLIT
+    output_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = output_dir / "manifest.csv"
+
+    print(f"\nStarting multiprocessing on {len(selected_examples)} segments...")
+    all_manifest_rows: list[dict[str, object]] = []
+
+    with concurrent.futures.ProcessPoolExecutor(max_workers=None) as executor:
+        results = executor.map(process_and_save_segment, selected_examples)
+
+        for rows in tqdm(results, total=len(selected_examples), desc="Processing segments"):
+            if rows:
+                all_manifest_rows.extend(rows)
+
+    with manifest_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=[
+                "image_path",
+                "image_path_relative",
+                "patient_id",
+                "segment_token",
+                "channel_name",
+                "height",
+                "width",
+            ],
+        )
+        writer.writeheader()
+        writer.writerows(all_manifest_rows)
+
+    saved_by_patient: dict[str, int] = {}
+    for row in all_manifest_rows:
+        patient_id = row["patient_id"]
         saved_by_patient[patient_id] = saved_by_patient.get(patient_id, 0) + 1
 
-with manifest_path.open("w", newline="", encoding="utf-8") as handle:
-    writer = csv.DictWriter(
-        handle,
-        fieldnames=[
-            "image_path",
-            "image_path_relative",
-            "patient_id",
-            "segment_token",
-            "channel_name",
-            "height",
-            "width",
-        ],
-    )
-    writer.writeheader()
-    writer.writerows(rows)
-
-print(f"Saved {num_saved} images to: {output_dir}")
-for patient_id in sorted(saved_by_patient):
-    print(f"  {patient_id}: {saved_by_patient[patient_id]} images")
-print(f"Manifest: {manifest_path}")
+    print(f"Saved {len(all_manifest_rows)} images to: {output_dir}")
+    for patient_id in sorted(saved_by_patient):
+        print(f"  {patient_id}: {saved_by_patient[patient_id]} images")
+    print(f"Manifest: {manifest_path}")
