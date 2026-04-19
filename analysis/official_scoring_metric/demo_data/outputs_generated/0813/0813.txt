@@ -1,0 +1,4 @@
+Patient: 0813
+Outcome: Good
+Outcome Probability: 0.739
+CPC: 1.000

@@ -1,0 +1,4 @@
+Patient: 0390
+Outcome: Good
+Outcome Probability: 0.664
+CPC: 1.000

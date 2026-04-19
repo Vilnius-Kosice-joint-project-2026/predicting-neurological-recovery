@@ -13,7 +13,7 @@
 # described on the Challenge webpage.
 
 import os, os.path, sys, numpy as np
-from analysis.official_scoring_metric.helper_code import *
+from helper_code import *
 
 # Evaluate the models.
 def evaluate_model(label_folder, output_folder):
@@ -93,7 +93,10 @@ def compute_challenge_score(labels, outputs, hospitals):
 
         # Collect the unique output values as the thresholds for the positive and negative classes.
         thresholds = np.unique(current_outputs)
-        thresholds = np.append(thresholds, thresholds[-1]+1)
+        try:
+            thresholds = np.append(thresholds, thresholds[-1]+1)
+        except IndexError:
+            print(f"Warning: No thresholds found for hospital {hospital}.")
         thresholds = thresholds[::-1]
         num_thresholds = len(thresholds)
 
@@ -173,7 +176,10 @@ def compute_auc(labels, outputs):
 
     # Collect the unique output values as the thresholds for the positive and negative classes.
     thresholds = np.unique(outputs)
-    thresholds = np.append(thresholds, thresholds[-1]+1)
+    try:
+        thresholds = np.append(thresholds, thresholds[-1]+1)
+    except IndexError:
+        print("Warning: No thresholds found.", print(thresholds))
     thresholds = thresholds[::-1]
     num_thresholds = len(thresholds)
 

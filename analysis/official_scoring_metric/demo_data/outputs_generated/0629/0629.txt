@@ -1,0 +1,4 @@
+Patient: 0629
+Outcome: Good
+Outcome Probability: 0.778
+CPC: 1.000

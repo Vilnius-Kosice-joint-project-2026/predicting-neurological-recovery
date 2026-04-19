@@ -1,4 +1,4 @@
 Patient: 0299
 Outcome: Good
-Outcome Probability: 0.280
-CPC: 2.119
+Outcome Probability: 0.687
+CPC: 1.000

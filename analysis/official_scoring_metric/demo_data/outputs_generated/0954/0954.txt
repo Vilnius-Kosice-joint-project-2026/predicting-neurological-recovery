@@ -1,0 +1,4 @@
+Patient: 0954
+Outcome: Poor
+Outcome Probability: 0.219
+CPC: 5.000

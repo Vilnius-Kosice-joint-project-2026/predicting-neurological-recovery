@@ -60,5 +60,5 @@ CPC: 5
 # Run evaluation
 
 ```powershell
-python official_scoring_metric/evaluate_model.py official_scoring_metric/demo_data/labels official_scoring_metric/demo_data/outputs
+python analysis/official_scoring_metric/evaluate_model.py analysis/official_scoring_metric/demo_data/labels analysis/official_scoring_metric/demo_data/outputs
 ```

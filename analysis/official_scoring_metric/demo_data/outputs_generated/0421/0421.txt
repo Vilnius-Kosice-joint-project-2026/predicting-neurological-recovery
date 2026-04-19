@@ -1,0 +1,4 @@
+Patient: 0421
+Outcome: Poor
+Outcome Probability: 0.400
+CPC: 5.000

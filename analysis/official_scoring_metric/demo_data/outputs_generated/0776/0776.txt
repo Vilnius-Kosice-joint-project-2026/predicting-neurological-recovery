@@ -1,0 +1,4 @@
+Patient: 0776
+Outcome: Good
+Outcome Probability: 0.397
+CPC: 1.000

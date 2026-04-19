@@ -1,0 +1,4 @@
+Patient: 0404
+Outcome: Good
+Outcome Probability: 0.617
+CPC: 1.000
