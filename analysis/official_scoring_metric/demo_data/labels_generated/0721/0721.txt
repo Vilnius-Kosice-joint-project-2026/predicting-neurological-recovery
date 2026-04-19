@@ -1,0 +1,10 @@
+Patient: 0721
+Hospital: A
+Age: 66
+Sex: Male
+ROSC: nan
+OHCA: True
+Shockable Rhythm: True
+TTM: 33
+Outcome: Good
+CPC: 1

@@ -1,0 +1,10 @@
+Patient: 0504
+Hospital: A
+Age: 61
+Sex: Male
+ROSC: nan
+OHCA: nan
+Shockable Rhythm: nan
+TTM: 36
+Outcome: Good
+CPC: 1

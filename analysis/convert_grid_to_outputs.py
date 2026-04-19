@@ -49,18 +49,22 @@ if __name__ == "__main__":
     # filter out from df any patients that are not in training_patients
     df = df[df['Patient'].isin(training_patients)]
 
-    for patient_id, group in df.groupby("Patient", sort=True):
-        outcome = group["Outcome"].mode().iloc[0]
-        if outcome == "Good":
-            probability = group["prob_good"].mean()
-            cpc = 1.0
-        else:
-            probability = group["prob_poor"].mean()
-            cpc = 5.0
+    patient_preds = (
+        df
+        .groupby("Patient", as_index=False)[["prob_poor", "prob_good"]]
+        .mean()
+    )
+    patient_preds["final_prediction"] = (patient_preds["prob_good"] > 0.5).astype(int)
+    patient_preds["Outcome"] = patient_preds["final_prediction"].map({1: "Good", 0: "Poor"})
 
-        write_patient_file(output_dir, patient_id, outcome, probability, cpc)
+    for _, row in patient_preds.sort_values("Patient").iterrows():
+        outcome = row["Outcome"]
+        probability = row["prob_good"] if outcome == "Good" else row["prob_poor"]
+        cpc = 1.0 if outcome == "Good" else 5.0
 
-    print(f"Wrote {len(df['Patient'].unique())} patient files to {output_dir}")
+        write_patient_file(output_dir, row["Patient"], outcome, probability, cpc)
+
+    print(f"Wrote {len(patient_preds)} patient files to {output_dir}")
 
     # take all unique patients fromm df and copy their original data file from icare_data\training\{patient_id}\{patient_id}.txt to analysis\official_scoring_metric\demo_data\labels_generated
     labels_output_dir = os.path.join(
@@ -72,13 +76,9 @@ if __name__ == "__main__":
 
     for patient_id in df['Patient'].unique():
         src_path = os.path.join("icare_data", "training", patient_id, f"{patient_id}.txt")
-        output_dir = os.path.join(
-        "analysis", "official_scoring_metric", "demo_data", "outputs_generated", patient_id
-        )
-        os.makedirs(output_dir, exist_ok=True)
-        dst_path = os.path.join(labels_output_dir, patient_id, f"{patient_id}.txt")
+        patient_label_dir = os.path.join(labels_output_dir, patient_id)
+        os.makedirs(patient_label_dir, exist_ok=True)
+        dst_path = os.path.join(patient_label_dir, f"{patient_id}.txt")
         shutil.copy(src_path, dst_path)
 
     print(f"Copied {len(df['Patient'].unique())} patient label files to {labels_output_dir}")
-
-

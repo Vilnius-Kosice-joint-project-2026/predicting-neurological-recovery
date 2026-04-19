@@ -1,0 +1,10 @@
+Patient: 0332
+Hospital: D
+Age: 68
+Sex: Female
+ROSC: 60
+OHCA: False
+Shockable Rhythm: False
+TTM: 33
+Outcome: Good
+CPC: 1

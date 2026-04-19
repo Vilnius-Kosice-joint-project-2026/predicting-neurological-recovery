@@ -1,0 +1,10 @@
+Patient: 0373
+Hospital: F
+Age: 36
+Sex: Female
+ROSC: 30
+OHCA: True
+Shockable Rhythm: True
+TTM: nan
+Outcome: Good
+CPC: 1

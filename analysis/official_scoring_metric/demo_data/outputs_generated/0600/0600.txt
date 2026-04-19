@@ -1,4 +1,4 @@
 Patient: 0600
-Outcome: Poor
-Outcome Probability: 0.270
-CPC: 5.000
+Outcome: Good
+Outcome Probability: 0.730
+CPC: 1.000

@@ -1,0 +1,10 @@
+Patient: 0443
+Hospital: D
+Age: 31
+Sex: Male
+ROSC: 20
+OHCA: True
+Shockable Rhythm: False
+TTM: 33
+Outcome: Good
+CPC: 1

@@ -1,0 +1,10 @@
+Patient: 0452
+Hospital: B
+Age: 82
+Sex: Male
+ROSC: 15
+OHCA: True
+Shockable Rhythm: True
+TTM: 33
+Outcome: Poor
+CPC: 5

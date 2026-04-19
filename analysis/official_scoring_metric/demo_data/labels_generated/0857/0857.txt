@@ -1,0 +1,10 @@
+Patient: 0857
+Hospital: B
+Age: 62
+Sex: Female
+ROSC: 30
+OHCA: True
+Shockable Rhythm: True
+TTM: 33
+Outcome: Good
+CPC: 1

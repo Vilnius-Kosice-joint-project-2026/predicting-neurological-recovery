@@ -1,0 +1,10 @@
+Patient: 0615
+Hospital: B
+Age: 70
+Sex: Male
+ROSC: 10
+OHCA: False
+Shockable Rhythm: True
+TTM: 33
+Outcome: Good
+CPC: 1

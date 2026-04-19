@@ -1,4 +1,4 @@
 Patient: 0483
-Outcome: Poor
-Outcome Probability: 0.363
-CPC: 5.000
+Outcome: Good
+Outcome Probability: 0.637
+CPC: 1.000

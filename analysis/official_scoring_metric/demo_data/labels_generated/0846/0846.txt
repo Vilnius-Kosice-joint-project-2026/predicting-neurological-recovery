@@ -1,0 +1,10 @@
+Patient: 0846
+Hospital: B
+Age: 62
+Sex: Male
+ROSC: 10
+OHCA: True
+Shockable Rhythm: True
+TTM: 33
+Outcome: Good
+CPC: 1

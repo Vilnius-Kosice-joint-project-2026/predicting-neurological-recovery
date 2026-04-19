@@ -1,0 +1,10 @@
+Patient: 0711
+Hospital: F
+Age: 27
+Sex: Male
+ROSC: 30
+OHCA: True
+Shockable Rhythm: False
+TTM: nan
+Outcome: Poor
+CPC: 5

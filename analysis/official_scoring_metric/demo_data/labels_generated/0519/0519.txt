@@ -1,0 +1,10 @@
+Patient: 0519
+Hospital: B
+Age: 50
+Sex: Male
+ROSC: 35
+OHCA: True
+Shockable Rhythm: True
+TTM: 33
+Outcome: Poor
+CPC: 5

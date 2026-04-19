@@ -1,0 +1,10 @@
+Patient: 0468
+Hospital: A
+Age: 60
+Sex: Female
+ROSC: nan
+OHCA: True
+Shockable Rhythm: False
+TTM: 33
+Outcome: Poor
+CPC: 5

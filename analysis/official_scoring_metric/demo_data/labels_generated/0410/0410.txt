@@ -1,0 +1,10 @@
+Patient: 0410
+Hospital: F
+Age: 68
+Sex: Male
+ROSC: nan
+OHCA: True
+Shockable Rhythm: True
+TTM: nan
+Outcome: Good
+CPC: 1

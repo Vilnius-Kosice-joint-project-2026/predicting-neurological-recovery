@@ -1,0 +1,10 @@
+Patient: 0354
+Hospital: E
+Age: 40
+Sex: Male
+ROSC: 5
+OHCA: True
+Shockable Rhythm: True
+TTM: 33
+Outcome: Good
+CPC: 2

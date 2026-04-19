@@ -1,0 +1,10 @@
+Patient: 0636
+Hospital: A
+Age: 63
+Sex: Male
+ROSC: nan
+OHCA: nan
+Shockable Rhythm: nan
+TTM: 36
+Outcome: Poor
+CPC: 5
