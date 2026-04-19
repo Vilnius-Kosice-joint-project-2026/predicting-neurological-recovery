@@ -13,7 +13,7 @@
 # described on the Challenge webpage.
 
 import os, os.path, sys, numpy as np
-from helper_code import *
+from analysis.official_scoring_metric.helper_code import *
 
 # Evaluate the models.
 def evaluate_model(label_folder, output_folder):
