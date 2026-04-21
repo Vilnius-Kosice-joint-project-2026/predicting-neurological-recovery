@@ -3,6 +3,7 @@ import paramiko
 import stat
 import os
 from dotenv import load_dotenv
+import time
 
 load_dotenv()
 hostname = os.getenv("HOSTNAME")
@@ -33,7 +34,7 @@ try:
     contents = sftp.listdir_attr(remote_path)
     folders = [item.filename for item in contents if stat.S_ISDIR(item.st_mode)]
 
-    folders = ["0284", "0286"]  # Example: ['0284', '0286'] or [] to list all folders
+    folders = ["0286"]  # Example: ['0284', '0286'] or [] to list all folders
 
     if folders:
         print(f"Found {len(folders)} folders:")
@@ -68,6 +69,22 @@ try:
                             print(
                                 f"No {mel_path} found for {eeg_file}. Consider generating it."
                             )
+                            # check if the specific EEG file is already in the local folder
+                            local_file_path = f"icare_data/training/{folder}/{eeg_file}"
+                            if os.path.exists(local_file_path):
+                                print(
+                                    f"EEG file {eeg_file} already exists locally at {local_file_path}"
+                                )
+                            else:
+                                print(
+                                    f"EEG file {eeg_file} not found locally. Consider downloading it from {folder_path}."
+                                )
+                                # If the file doesn't exist locally, download it
+                                remote_file_path = posixpath.join(folder_path, eeg_file)
+                                os.makedirs(os.path.dirname(local_file_path), exist_ok=True)
+                                print(f"Downloading {remote_file_path} to {local_file_path}...")
+                                sftp.get(remote_file_path, local_file_path)
+                                time.sleep(5)
                 else:
                     print("  No EEG files found in this folder.")
             except IOError as io_err:
