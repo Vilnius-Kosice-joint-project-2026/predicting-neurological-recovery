@@ -22,8 +22,7 @@ from tqdm import tqdm
 DATA_ROOT = Path("icare_data/training")
 INCLUDED_SIGNAL_TYPES = ("EEG",)
 MAX_EXAMPLES_PER_TYPE = 9999
-PREFERRED_PATIENTS: set[str] = set()  # Example: {"0676", "0690", "0651"}
-PREFERRED_SEGMENT_ID: Optional[str] = None  # Example: "002"
+PREFERRED_PATIENTS: set[str] = {'0284'} # Example: {"0676", "0690", "0651"} or set() 
 
 TARGET_SAMPLING_RATE_HZ = 128.0
 
@@ -339,8 +338,7 @@ def select_static_examples(
     records: list[SegmentRecord],
     signal_types: tuple[str, ...],
     max_examples_per_type: int,
-    preferred_patients: Optional[set[str]] = None,
-    preferred_segment_id: Optional[str] = None,
+    preferred_patients: Optional[set[str]] = None
 ) -> list[SegmentRecord]:
     """Select deterministic examples per signal type for static visualization."""
     selected: list[SegmentRecord] = []
@@ -348,12 +346,6 @@ def select_static_examples(
 
     for signal_type in signal_types:
         by_type = [record for record in records if record.signal_type == signal_type]
-        if preferred_segment_id:
-            by_type = [
-                record
-                for record in by_type
-                if record.segment_id == preferred_segment_id
-            ]
 
         if preferred_patients:
             prioritized = [
@@ -1111,23 +1103,21 @@ def process_and_save_segment(record: SegmentRecord) -> list[dict]:
         signal_uv, metadata = prepare_bipolar_segment(signal_uv, metadata)
         
         # 2. Filter & Resample
-        if ENABLE_BANDPASS_FILTER:
-            signal_uv, _ = apply_bandpass_butterworth(
-                signal_uv, float(metadata["sampling_rate_hz"]), 
-                FILTER_LOW_HZ, FILTER_HIGH_HZ, FILTER_ORDER
-            )
+        signal_uv, _ = apply_bandpass_butterworth(
+            signal_uv, float(metadata["sampling_rate_hz"]), 
+            FILTER_LOW_HZ, FILTER_HIGH_HZ, FILTER_ORDER
+        )
         
         signal_uv, metadata = resample_to_target_hz(
             signal_uv, metadata, TARGET_SAMPLING_RATE_HZ
         )
 
         # 3. Flat Zero
-        if ENABLE_FLAT_ZERO_ELIMINATION:
-            signal_uv, _ = mask_flat_zero_windows(
-                signal_uv, metadata, 
-                FLAT_ZERO_WINDOW_SECONDS, FLAT_ZERO_ABS_TOLERANCE_UV, 
-                FLAT_ZERO_MIN_CONSECUTIVE_WINDOWS, FLAT_ZERO_REQUIRE_ALL_CHANNELS_FLAT
-            )
+        signal_uv, _ = mask_flat_zero_windows(
+            signal_uv, metadata, 
+            FLAT_ZERO_WINDOW_SECONDS, FLAT_ZERO_ABS_TOLERANCE_UV, 
+            FLAT_ZERO_MIN_CONSECUTIVE_WINDOWS, FLAT_ZERO_REQUIRE_ALL_CHANNELS_FLAT
+        )
 
         # 4. Mel Spectrogram creation
         spectrograms_by_channel, _, _ = create_bipolar_mel_spectrograms(
@@ -1170,66 +1160,49 @@ def process_and_save_segment(record: SegmentRecord) -> list[dict]:
     # Return the data needed for the CSV. The heavy arrays are now garbage collected!
     return manifest_rows
 
-if __name__ == '__main__':
+def do_everything(patients):
     all_records = discover_icare_segments(DATA_ROOT)
-    print(f"Discovered paired segments: {len(all_records)}")
+    print(f"Discovered paired segments in {DATA_ROOT}: {len(all_records)}")
 
     for signal_type in INCLUDED_SIGNAL_TYPES:
         count = sum(record.signal_type == signal_type for record in all_records)
         print(f"  {signal_type}: {count}")
 
-    if PREFERRED_PATIENTS:
-        selected_examples = [
-            record
-            for record in all_records
-            if record.signal_type in INCLUDED_SIGNAL_TYPES
-            and record.patient_id in PREFERRED_PATIENTS
-            and (PREFERRED_SEGMENT_ID is None or record.segment_id == PREFERRED_SEGMENT_ID)
-        ]
-    else:
-        from collections import defaultdict
-        patient_to_records = defaultdict(list)
-        
-        # Filter by EEG and group by patient
-        for record in all_records:
-            if record.signal_type in INCLUDED_SIGNAL_TYPES:
-                patient_to_records[record.patient_id].append(record)
-                
-        selected_examples = []
-        for pid, records in patient_to_records.items():
-            # Sort by hour_token numerically
-            records.sort(key=lambda r: int(r.hour_token))
-            # Keep only the final 2 hours
-            selected_examples.extend(records[-2:])
+    selected_examples = [
+        record
+        for record in all_records
+        if record.signal_type in INCLUDED_SIGNAL_TYPES
+        and str(record.patient_id) == str(patients)
+    ]
 
     print(f"\nSelected static examples: {len(selected_examples)}")
-    selected_patient_ids = sorted({record.patient_id for record in selected_examples})
-    print(f"Selected patients: {selected_patient_ids if selected_patient_ids else 'None'}")
-    for record in selected_examples[:10]:
+
+    existing_amount = 0
+
+    for record in selected_examples:
+        # check if folder exists for patient in the output images, for example exports\mel_360x360\train\0284
+        patient_id = record.patient_id
+        patient_dir = Path("exports") / "mel_360x360" / "train" / patient_id
+
+        if patient_dir.exists() and patient_dir.is_dir():
+            print("folder exists")
+            # check if there are already images for the segment in the folder
+            segment_token = f"{record.patient_id}_{record.segment_id}_{record.hour_token}_{record.signal_type}"
+            existing_images = list(patient_dir.glob(f"{segment_token}__*.png"))
+            if existing_images:
+                print(f"  Found {len(existing_images)} existing images for segment {segment_token}, skipping processing.")
+                existing_amount += 1
+                continue
+        else:
+            print("folder does not exist")
+
         print(
             f"  {record.patient_id}_{record.segment_id}_{record.hour_token}_{record.signal_type}"
         )
-    if len(selected_examples) > 10:
-        print(f"  ... and {len(selected_examples) - 10} more")
-
-    print(f"\nPreprocessing mode: bipolar")
-    print(
-        f"Target sampling rate={TARGET_SAMPLING_RATE_HZ}Hz | "
-        f"Band-pass filter enabled={ENABLE_BANDPASS_FILTER} "
-        f"(order={FILTER_ORDER}, low={FILTER_LOW_HZ}Hz, high={FILTER_HIGH_HZ}Hz)"
-    )
-    print(
-        f"Flat-zero elimination enabled={ENABLE_FLAT_ZERO_ELIMINATION} | "
-        f"window={FLAT_ZERO_WINDOW_SECONDS}s | "
-        f"tol={FLAT_ZERO_ABS_TOLERANCE_UV}uV | "
-        f"min_consecutive={FLAT_ZERO_MIN_CONSECUTIVE_WINDOWS} | "
-        f"all_channels={FLAT_ZERO_REQUIRE_ALL_CHANNELS_FLAT}"
-    )
-    print(
-        f"Mel enabled={ENABLE_MEL_SPECTROGRAM} | mel_bins={MEL_N_MELS} | "
-        f"hop={MEL_HOP_SECONDS}s | f_range=[{MEL_F_MIN_HZ}, {MEL_F_MAX_HZ}]Hz | "
-        f"target_shape=({MEL_N_MELS}, {MEL_EXPECTED_TIME_STEPS})"
-    )
+    
+    if len(selected_examples) > 0 and existing_amount == len(selected_examples):
+        print("\nAll selected examples already have images saved. Adjust filters or clear output directory to reprocess.")
+        return
 
     if not selected_examples:
         print("No examples selected. Adjust filters in the previous cell.")
@@ -1241,7 +1214,8 @@ if __name__ == '__main__':
     print(f"\nStarting multiprocessing on {len(selected_examples)} segments...")
     all_manifest_rows: list[dict[str, object]] = []
 
-    with concurrent.futures.ProcessPoolExecutor(max_workers=None) as executor:
+    max_safe_workers = 4
+    with concurrent.futures.ProcessPoolExecutor(max_workers=max_safe_workers) as executor:
         results = executor.map(process_and_save_segment, selected_examples)
 
         for rows in tqdm(results, total=len(selected_examples), desc="Processing segments"):
@@ -1273,3 +1247,9 @@ if __name__ == '__main__':
     for patient_id in sorted(saved_by_patient):
         print(f"  {patient_id}: {saved_by_patient[patient_id]} images")
     print(f"Manifest: {manifest_path}")
+
+
+
+if __name__ == '__main__':
+    do_everything("0286")
+    
