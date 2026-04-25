@@ -27,18 +27,21 @@ if __name__ == "__main__":
     os.makedirs(output_dir, exist_ok=True)
 
     df = pd.read_csv(
-        "analysis\\EfficientNetV2-S_data\\test_predictions_EfficientNetV2-S_grid.csv",
+        "analysis\\EfficientNetV2-S_data\\test_predictions_EfficientNetV2-S_grid(3).csv",
+        # "analysis\\EfficientNet-B0\\test_predictions_grid.csv",
         dtype={"Patient": str},
     )
+    df['Patient'] = df['Patient'].str.zfill(4)
 
     
     print(df['Patient'].unique())
 
     # read all folder names in icare_data\training
-    training_dir = os.path.join("icare_data", "training")
-    training_patients = set(os.listdir(training_dir))
+    training_patients_df = pd.read_csv("artifacts//combined_patient_data.csv", dtype={"Patient": str})
+    training_patients_df['Patient'] = training_patients_df['Patient'].str.zfill(4)
+    training_patients = set(training_patients_df["Patient"].tolist())
 
-    print(training_patients)
+    print(training_patients_df.head())
 
     # create a set of patients that are in df['Patient'].unique() and in training_patients
     patients_in_both = set(df['Patient'].unique()) & training_patients
