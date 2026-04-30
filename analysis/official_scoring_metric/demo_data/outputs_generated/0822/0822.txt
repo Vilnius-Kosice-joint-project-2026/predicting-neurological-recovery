@@ -1,4 +1,0 @@
-Patient: 0822
-Outcome: Poor
-Outcome Probability: 0.519
-CPC: 5.000

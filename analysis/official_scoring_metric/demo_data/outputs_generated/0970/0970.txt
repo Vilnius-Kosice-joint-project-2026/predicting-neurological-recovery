@@ -1,4 +1,0 @@
-Patient: 0970
-Outcome: Good
-Outcome Probability: 0.627
-CPC: 1.000

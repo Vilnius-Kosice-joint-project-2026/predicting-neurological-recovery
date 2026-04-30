@@ -1,4 +1,4 @@
 Patient: 0462
 Outcome: Good
-Outcome Probability: 0.546
+Outcome Probability: 0.836
 CPC: 1.000

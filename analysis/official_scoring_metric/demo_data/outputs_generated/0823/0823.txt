@@ -1,4 +1,4 @@
 Patient: 0823
 Outcome: Good
-Outcome Probability: 0.804
+Outcome Probability: 0.602
 CPC: 1.000

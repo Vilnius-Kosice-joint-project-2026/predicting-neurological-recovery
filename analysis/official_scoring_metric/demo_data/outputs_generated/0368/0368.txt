@@ -1,4 +1,4 @@
 Patient: 0368
-Outcome: Good
-Outcome Probability: 0.556
-CPC: 1.000
+Outcome: Poor
+Outcome Probability: 0.777
+CPC: 5.000

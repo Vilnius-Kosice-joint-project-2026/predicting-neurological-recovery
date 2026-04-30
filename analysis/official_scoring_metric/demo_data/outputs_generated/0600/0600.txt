@@ -1,4 +1,0 @@
-Patient: 0600
-Outcome: Good
-Outcome Probability: 0.730
-CPC: 1.000

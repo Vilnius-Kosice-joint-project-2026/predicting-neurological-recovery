@@ -218,3 +218,4 @@ training_data.parquet
 /exports/mel_stitched_224x448
 /analysis/official_scoring_metric/demo_data/outputs_generated
 /analysis/official_scoring_metric/demo_data/labels_generated
+*.7z

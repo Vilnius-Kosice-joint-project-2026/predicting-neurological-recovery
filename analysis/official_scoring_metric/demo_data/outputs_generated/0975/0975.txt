@@ -1,4 +1,4 @@
 Patient: 0975
 Outcome: Good
-Outcome Probability: 0.574
+Outcome Probability: 0.873
 CPC: 1.000
