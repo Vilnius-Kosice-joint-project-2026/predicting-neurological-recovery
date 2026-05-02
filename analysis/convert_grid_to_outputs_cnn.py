@@ -28,13 +28,9 @@ if __name__ == "__main__":
 
     df = pd.read_csv(
         "analysis\\EfficientNetV2-S_data\\test_predictions_EfficientNetV2-S_grid(3).csv",
-        # "analysis\\EfficientNet-B0\\test_predictions_grid.csv",
         dtype={"Patient": str},
     )
     df['Patient'] = df['Patient'].str.zfill(4)
-
-    
-    print(df['Patient'].unique())
 
     # read all folder names in icare_data\training
     training_patients_df = pd.read_csv("artifacts//combined_patient_data.csv", dtype={"Patient": str})
@@ -58,7 +54,7 @@ if __name__ == "__main__":
         .mean()
     )
     patient_preds["final_prediction"] = (patient_preds["prob_good"] > 0.5).astype(int)
-    patient_preds["Outcome"] = patient_preds["final_prediction"].map({1: "Good", 0: "Poor"})
+    patient_preds["Outcome"] = patient_preds["final_prediction"].map({0: "Good", 1: "Poor"})
 
     for _, row in patient_preds.sort_values("Patient").iterrows():
         outcome = row["Outcome"]
