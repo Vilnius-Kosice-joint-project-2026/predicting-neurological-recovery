@@ -1,7 +1,3 @@
-# ==============================================================================
-# MUST BE AT THE VERY TOP: Force environment variables BEFORE TensorFlow loads
-# This prevents SLURM from dropping our GPU safety flags.
-# ==============================================================================
 import os
 os.environ['TF_CUDNN_USE_AUTOTUNE'] = '0'
 os.environ['TF_USE_LEGACY_KERAS'] = '1'
@@ -28,6 +24,7 @@ from sklearn.utils.class_weight import compute_class_weight
 from tensorflow.keras import layers
 from tensorflow.keras.applications import EfficientNetV2S
 from tensorflow.keras.callbacks import CSVLogger, ModelCheckpoint
+from tensorflow.keras.callbacks import CSVLogger, ModelCheckpoint, EarlyStopping
 
 # ---------------------------------------------------------
 # Enable GPU Memory Growth safely
@@ -136,8 +133,8 @@ SEED = 1234
 IMG_HEIGHT = 224
 IMG_WIDTH = 448
 NUM_CLASSES = 2
-PER_REPLICA_BATCH_SIZE = 8 
-EPOCHS = 3
+PER_REPLICA_BATCH_SIZE = 32
+EPOCHS = 10
 TRAINING_MODALITY = 'grid'
 
 random.seed(SEED)
@@ -171,9 +168,10 @@ def load_grid_image(file_path, label):
 # Cross-Validation Loop
 # ---------------------------------------------------------
 patient_meta = df_all_stitched[['Patient', 'Outcome']].drop_duplicates()
-skf = StratifiedKFold(n_splits=3, shuffle=True, random_state=SEED)
+skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=SEED)
 
 all_fold_results =[]
+oof_predictions_list = []
 
 for fold, (train_idx, test_idx) in enumerate(skf.split(patient_meta, patient_meta['Outcome'])):
     print(f"\n{'='*20} STARTING FOLD {fold+1} {'='*20}")
@@ -242,8 +240,9 @@ for fold, (train_idx, test_idx) in enumerate(skf.split(patient_meta, patient_met
             metrics=['accuracy', tf.keras.metrics.SensitivityAtSpecificity(0.95, name='tpr_at_fpr05')]
         )
 
-    callbacks =[
+    callbacks = [
         ModelCheckpoint(filepath=str(checkpoint_path), monitor='val_tpr_at_fpr05', mode='max', save_best_only=True),
+        EarlyStopping(monitor='val_tpr_at_fpr05', mode='max', patience=3, restore_best_weights=True),
         CSVLogger(filename=str(history_path))
     ]
 
@@ -256,6 +255,10 @@ for fold, (train_idx, test_idx) in enumerate(skf.split(patient_meta, patient_met
     res_df['prob_poor'] = preds
     patient_res = res_df.groupby(['Patient', 'label'])['prob_poor'].mean().reset_index()
 
+    # Track which fold this patient was evaluated in
+    patient_res['fold'] = fold + 1
+    oof_predictions_list.append(patient_res)
+
     auc = roc_auc_score(patient_res['label'], patient_res['prob_poor'])
     all_fold_results.append({'fold': fold+1, 'auc': auc})
     print(f"Fold {fold+1} Patient-Level AUC: {auc:.4f}")
@@ -266,3 +269,11 @@ for fold, (train_idx, test_idx) in enumerate(skf.split(patient_meta, patient_met
 cv_results_df = pd.DataFrame(all_fold_results)
 print(cv_results_df)
 print(f"Mean CV AUC: {cv_results_df['auc'].mean():.4f}")
+
+# Combine all 5 folds of test predictions into a single DataFrame
+oof_df = pd.concat(oof_predictions_list, ignore_index=True)
+
+oof_save_path = MODEL_OUTPUT_ROOT / f'oof_predictions_cnn1_{TRAINING_MODALITY}.csv'
+oof_df.to_csv(oof_save_path, index=False)
+
+print(f"\nSUCCESS: OOF predictions saved for {len(oof_df)} patients to {oof_save_path}")
