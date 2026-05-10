@@ -1,3 +1,4 @@
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
@@ -46,10 +47,44 @@ def create_grid_stitched_image(image_paths: list[Path], output_path: Path) -> No
     Image.fromarray(stitched_grid, mode="L").convert("RGB").save(output_path)
 
 
+def process_single_segment(
+    patient_id: str,
+    segment_token: str,
+    segment_image_paths: list[Path],
+    stitched_export_root: Path,
+    training_images_root: Path,
+) -> dict | None:
+    """Helper for parallel processing: stitch one segment and return its record."""
+    if len(segment_image_paths) != 18:
+        return None
+
+    stitched_output_path = (
+        stitched_export_root / patient_id / f"grid_stitched_{segment_token}.png"
+    )
+
+    try:
+        # Create and save the stitched image
+        create_grid_stitched_image(segment_image_paths, stitched_output_path)
+
+        # Store relative paths for the parquet artifact
+        relative_path = str(
+            stitched_output_path.relative_to(training_images_root.parent.parent)
+        )
+
+        return {
+            "Patient": patient_id,
+            "segment_token": segment_token,
+            "grid_relative_path": relative_path,
+        }
+    except Exception as e:
+        print(f"Error processing {patient_id} segment {segment_token}: {e}")
+        return None
+
+
 def build_and_stitch_all_images(
     training_images_root: Path, stitched_export_root: Path
 ) -> pd.DataFrame:
-    """Scan all patient folders, find segments, stitch images and return metadata.
+    """Scan all patient folders, find segments, stitch images in parallel and return metadata.
 
     Args:
         training_images_root: The root directory containing individual image folders.
@@ -58,12 +93,11 @@ def build_and_stitch_all_images(
     Returns:
         A dataframe containing the paths to the stitched images.
     """
-    records = []
-
     patient_folders = sorted(p for p in training_images_root.iterdir() if p.is_dir())
     print(f"Found {len(patient_folders)} patient folders in {training_images_root}")
 
-    for patient_folder in tqdm(patient_folders, desc="Stitching patients"):
+    tasks = []
+    for patient_folder in patient_folders:
         patient_id = patient_folder.name
 
         segment_to_paths: dict[str, list[Path]] = {}
@@ -74,32 +108,28 @@ def build_and_stitch_all_images(
             segment_token = filename_parts[0]
             segment_to_paths.setdefault(segment_token, []).append(image_path)
 
-        for segment_token, segment_image_paths in sorted(segment_to_paths.items()):
-            if len(segment_image_paths) != 18:
-                print(
-                    f"Skipping {patient_id} segment {segment_token}: found {len(segment_image_paths)} images instead of 18."
+        for segment_token, segment_image_paths in segment_to_paths.items():
+            tasks.append(
+                (
+                    patient_id,
+                    segment_token,
+                    segment_image_paths,
+                    stitched_export_root,
+                    training_images_root,
                 )
-                continue
-
-            stitched_output_path = (
-                stitched_export_root / patient_id / f"grid_stitched_{segment_token}.png"
             )
 
-            # Create and save the stitched image
-            create_grid_stitched_image(segment_image_paths, stitched_output_path)
+    records = []
+    print(f"Starting parallel stitching of {len(tasks)} segments...")
 
-            # Store relative paths for the parquet artifact
-            relative_path = str(
-                stitched_output_path.relative_to(training_images_root.parent.parent)
-            )
+    with ProcessPoolExecutor() as executor:
+        # Map tasks to the helper function
+        futures = [executor.submit(process_single_segment, *task) for task in tasks]
 
-            records.append(
-                {
-                    "Patient": patient_id,
-                    "segment_token": segment_token,
-                    "grid_relative_path": relative_path,
-                }
-            )
+        for future in tqdm(as_completed(futures), total=len(futures), desc="Stitching"):
+            result = future.result()
+            if result:
+                records.append(result)
 
     return pd.DataFrame.from_records(records)
 

@@ -64,12 +64,12 @@ if __name__ == "__main__":
     for _, row in patient_preds.sort_values("Patient").iterrows():
         outcome = row["Outcome"]
         
-        # If predicted Poor, probability is rf_prob_poor. If Good, it's (1 - rf_prob_poor)
+        # The official scorer ALWAYS expects the probability of a Poor outcome
+        probability = row["rf_prob_poor"]
+        
         if outcome == "Poor":
-            probability = row["rf_prob_poor"]
             cpc = 5.0
         else:
-            probability = 1.0 - row["rf_prob_poor"]
             cpc = 1.0
 
         write_patient_file(output_dir, row["Patient"], outcome, probability, cpc)

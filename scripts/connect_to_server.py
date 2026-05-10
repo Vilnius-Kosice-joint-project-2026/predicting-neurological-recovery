@@ -2,6 +2,7 @@ import posixpath
 import paramiko
 import stat
 import os
+import re
 from dotenv import load_dotenv
 import time
 from workflow_mne import do_everything
@@ -12,6 +13,13 @@ port = os.getenv("PORT")
 username = os.getenv("HPC_USERNAME")
 private_key_path = os.getenv("PRIVATE_KEY_PATH")
 remote_path = os.getenv("REMOTE_PATH")
+
+VALID_EEG_RECORD_PATTERN = re.compile(r"^\d{4}_\d{3}_\d{3}_EEG\.(?:hea|mat)$")
+
+
+def is_valid_eeg_record_filename(filename: str) -> bool:
+    """Return True only for canonical WFDB EEG record files."""
+    return bool(VALID_EEG_RECORD_PATTERN.match(filename))
 
 def main():
     try:
@@ -40,6 +48,8 @@ def main():
             print(f"Found {len(folders)} folders:")
             print(folders)
 
+            
+
             for folder in sorted(folders):
                 try:
                     folder_path = posixpath.join(remote_path, folder)
@@ -51,8 +61,7 @@ def main():
                             item.filename
                             for item in folder_contents
                             if not stat.S_ISDIR(item.st_mode) 
-                            and "EEG" in item.filename
-                            and len(item.filename.split('_')) > 2
+                            and is_valid_eeg_record_filename(item.filename)
                             and int(item.filename.split('_')[1]) <= 12
                         )
 

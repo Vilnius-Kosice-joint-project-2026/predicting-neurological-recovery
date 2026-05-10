@@ -58,16 +58,16 @@ if __name__ == "__main__":
     # 5. Generate Challenge files
     for _, row in patient_preds.sort_values("Patient").iterrows():
         p_poor = row["prob_poor"]
-        p_good = 1.0 - p_poor
+        
+        # The official scorer ALWAYS expects the probability of a Poor outcome
+        probability = p_poor
         
         # Decision logic: Outcome is Poor if prob_poor >= 0.5
         if p_poor >= 0.5:
             outcome = "Poor"
-            probability = p_poor
             cpc = 5.0
         else:
             outcome = "Good"
-            probability = p_good
             cpc = 1.0
 
         write_patient_file(output_dir, row["Patient"], outcome, probability, cpc)
