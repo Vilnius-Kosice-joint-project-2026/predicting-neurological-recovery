@@ -129,8 +129,8 @@ import numpy as np
 # 1. LOAD AND MERGE CNN OUT-OF-FOLD PREDICTIONS
 # ==========================================================
 # Adjust these paths to where you saved the new OOF CSVs
-csv_b0_path = repo_root / "analysis" / "EfficientNet-B0" / "oof_predictions_cnn2_grid.csv"
-csv_v2_path = repo_root / "analysis" / "EfficientNetV2-S_data" / "oof_predictions_cnn1_grid.csv"
+csv_b0_path = repo_root / "analysis" / "EfficientNet-B0" / "oof_predictions_cnn2_grid(1).csv"
+csv_v2_path = repo_root / "analysis" / "EfficientNetV2-S_data" / "oof_predictions_cnn1_grid(1).csv"
 
 cnn_df_b0 = pd.read_csv(csv_b0_path)
 cnn_df_v2_s = pd.read_csv(csv_v2_path)
@@ -213,10 +213,10 @@ def sensitivity_at_95_specificity(y_true, y_probs):
 tpr_at_fpr05_scorer = make_scorer(sensitivity_at_95_specificity, greater_is_better=True, response_method='predict_proba')
 
 param_grid = {
-    "n_estimators": [100],
+    "n_estimators": [50, 100, 200],
     "max_depth": [None],
     "min_samples_split": [2],
-    "min_samples_leaf": [2],
+    "min_samples_leaf": [2, 5],
     "max_features": ["sqrt"],
 }
 
