@@ -135,9 +135,25 @@ csv_v2_path = repo_root / "analysis" / "EfficientNetV2-S_data" / "oof_prediction
 cnn_df_b0 = pd.read_csv(csv_b0_path)
 cnn_df_v2_s = pd.read_csv(csv_v2_path)
 
-# Extract only the necessary columns and rename them
-cnn_df_b0 = cnn_df_b0[['Patient', 'prob_poor']].rename(columns={"prob_poor": "prob_poor_b0"})
-cnn_df_v2_s = cnn_df_v2_s[['Patient', 'prob_poor']].rename(columns={"prob_poor": "prob_poor_v2_s"})
+# Normalize CNN summaries and rename features by model
+cnn_feature_cols = [
+    'prob_poor_mean', 'prob_poor_std', 'prob_poor_min', 'prob_poor_max',
+    'prob_poor_median', 'prob_poor_q25', 'prob_poor_q75',
+    'prob_poor_count', 'prob_poor_frac_gt_05',
+    'prob_poor_iqr', 'prob_poor_confidence',
+]
+
+for df, model_suffix in [(cnn_df_b0, 'b0'), (cnn_df_v2_s, 'v2_s')]:
+    if 'prob_poor' in df.columns and 'prob_poor_mean' not in df.columns:
+        df.rename(columns={'prob_poor': 'prob_poor_mean'}, inplace=True)
+
+    available_cols = ['Patient'] + [c for c in cnn_feature_cols if c in df.columns]
+    df = df[available_cols]
+    df.rename(columns={c: f'{c}_{model_suffix}' for c in available_cols if c != 'Patient'}, inplace=True)
+    if model_suffix == 'b0':
+        cnn_df_b0 = df
+    else:
+        cnn_df_v2_s = df
 
 # Merge CNNs together
 cnn_patient_merged = pd.merge(cnn_df_b0, cnn_df_v2_s, on="Patient", how="inner")
@@ -154,10 +170,15 @@ print("Merged Data Shape:", merged_df.shape)
 model_df = merged_df.copy()
 
 # Notice we removed prob_good and predicted_label (RF doesn't need redundant data)
+cnn_base_features = [
+    'prob_poor_mean', 'prob_poor_std', 'prob_poor_min', 'prob_poor_max',
+    'prob_poor_median', 'prob_poor_q25', 'prob_poor_q75',
+    'prob_poor_count', 'prob_poor_frac_gt_05',
+    'prob_poor_iqr', 'prob_poor_confidence',
+]
 features = [
     "Age", "Sex", "ROSC", "OHCA", "Shockable Rhythm", "TTM",
-    "prob_poor_b0", "prob_poor_v2_s"
-]
+] + [f"{col}_b0" for col in cnn_base_features] + [f"{col}_v2_s" for col in cnn_base_features]
 
 # Drop missing targets
 model_df = model_df.dropna(subset=["Outcome"])

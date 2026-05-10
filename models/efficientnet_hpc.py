@@ -22,7 +22,7 @@ from sklearn.metrics import accuracy_score, confusion_matrix, roc_auc_score
 from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.utils.class_weight import compute_class_weight
 from tensorflow.keras import layers
-from tensorflow.keras.applications import EfficientNetB0
+from tensorflow.keras.applications import EfficientNetV2S
 from tensorflow.keras.callbacks import CSVLogger, ModelCheckpoint, EarlyStopping
 
 # Enable GPU Memory Growth safely
@@ -150,7 +150,7 @@ def load_grid_image(file_path, label):
     image = tf.image.decode_png(image_bytes, channels=3)
     image = tf.image.resize(image, (IMG_HEIGHT, IMG_WIDTH))
     image = tf.cast(image, tf.float32)
-    image = tf.keras.applications.efficientnet.preprocess_input(image)
+    image = tf.keras.applications.efficientnet_v2.preprocess_input(image)
     return image, label
 
 patient_meta = df_all_stitched[['Patient', 'Outcome']].drop_duplicates()
@@ -215,7 +215,7 @@ for fold, (train_idx, test_idx) in enumerate(skf.split(patient_meta, patient_met
 
     # Multi-GPU scope setup
     with strategy.scope():
-        base_model = EfficientNetB0(include_top=False, weights='imagenet', input_shape=(IMG_HEIGHT, IMG_WIDTH, 3))
+        base_model = EfficientNetV2S(include_top=False, weights='imagenet', input_shape=(IMG_HEIGHT, IMG_WIDTH, 3))
         x = layers.GlobalAveragePooling2D()(base_model.output)
         x = layers.Dropout(0.5)(x)
         outputs = layers.Dense(1, activation='sigmoid', dtype='float32')(x)
