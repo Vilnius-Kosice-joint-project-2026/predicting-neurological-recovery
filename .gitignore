@@ -219,3 +219,4 @@ training_data.parquet
 /analysis/official_scoring_metric/demo_data/outputs_generated
 /analysis/official_scoring_metric/demo_data/labels_generated
 *.7z
+*.md
