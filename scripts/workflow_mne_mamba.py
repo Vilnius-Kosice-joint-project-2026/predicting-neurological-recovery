@@ -24,40 +24,23 @@ INCLUDED_SIGNAL_TYPES = ("EEG",)
 MAX_EXAMPLES_PER_TYPE = 9999
 PREFERRED_PATIENTS: set[str] = {'0284'} # Example: {"0676", "0690", "0651"} or set() 
 
-TARGET_SAMPLING_RATE_HZ = 128.0
+# Output root for EEGMamba
+OUTPUT_DB_DIR = Path("icare_data/processed_mamba")
+SAMPLING_RATE_MAMBA = 200
+WINDOW_SECONDS_MAMBA = 10
+MAMBA_CHANNELS = [
+    "Fp1", "Fp2", "F3", "F4", "C3", "C4", "P3", "P4", "O1", "O2",
+    "F7", "F8", "T3", "T4", "T5", "T6", "Fz", "Cz", "Pz"
+]
 
-ENABLE_BANDPASS_FILTER = True
-FILTER_LOW_HZ = 0.5
-FILTER_HIGH_HZ = 50.0
-FILTER_ORDER = 2
+# Filtering parameters for EEGMamba
+LOW_CUTOFF_MAMBA = 0.3
+HIGH_CUTOFF_MAMBA = 75.0
+NOTCH_FREQ_MAMBA = 60.0
 
-ENABLE_FLAT_ZERO_ELIMINATION = True
-FLAT_ZERO_WINDOW_SECONDS = 10.0
-FLAT_ZERO_ABS_TOLERANCE_UV = 0.5
-FLAT_ZERO_MIN_CONSECUTIVE_WINDOWS = 1
-FLAT_ZERO_REQUIRE_ALL_CHANNELS_FLAT = True
+import lmdb
+import pickle
 
-ENABLE_MEL_SPECTROGRAM = True
-MEL_N_MELS = 360
-MEL_N_FFT = 1024
-MEL_HOP_SECONDS = 10.0
-MEL_F_MIN_HZ = 0.0
-MEL_F_MAX_HZ = 45.0
-MEL_EXPECTED_TIME_STEPS = 360
-MEL_PAD_VALUE_DB = -80.0
-
-DEFAULT_START_S = 0.0
-DEFAULT_DURATION_S = 300.0
-DEFAULT_SPACING_UV = 150.0
-
-# Output root for vision training
-EXPORT_ROOT = Path("exports/mel_360x360")
-EXPORT_SPLIT = "train"  # e.g., train/val/test
-# If True: normalize each image independently to [0,255]
-# If False: use fixed dB range for all images (better consistency across dataset)
-PER_IMAGE_NORMALIZE = False
-DB_MIN = -80.0
-DB_MAX = 0.0
 
 CANONICAL_19_ORDER: tuple[str, ...] = (
     "Fp1",
@@ -1160,96 +1143,88 @@ def process_and_save_segment(record: SegmentRecord) -> list[dict]:
     # Return the data needed for the CSV. The heavy arrays are now garbage collected!
     return manifest_rows
 
-def do_everything(patients):
-    all_records = discover_icare_segments(DATA_ROOT)
-    print(f"Discovered paired segments in {DATA_ROOT}: {len(all_records)}")
+def get_outcome(patient_dir: Path) -> Optional[int]:
+    """Read patient metadata and return binary outcome."""
+    patient_id = patient_dir.name
+    txt_path = patient_dir / f"{patient_id}.txt"
+    if not txt_path.exists():
+        return None
+    try:
+        content = txt_path.read_text()
+        match = re.search(r"Outcome: (Good|Poor)", content)
+        if match:
+            return 0 if match.group(1) == "Good" else 1
+    except Exception:
+        return None
+    return None
 
-    for signal_type in INCLUDED_SIGNAL_TYPES:
-        count = sum(record.signal_type == signal_type for record in all_records)
-        print(f"  {signal_type}: {count}")
-
-    selected_examples = [
-        record
-        for record in all_records
-        if record.signal_type in INCLUDED_SIGNAL_TYPES
-        and str(record.patient_id) == str(patients)
-    ]
-
-    print(f"\nSelected static examples: {len(selected_examples)}")
-
-    existing_amount = 0
-
-    for record in selected_examples:
-        # check if folder exists for patient in the output images, for example exports\mel_360x360\train\0284
-        patient_id = record.patient_id
-        patient_dir = Path("exports") / "mel_360x360" / "train" / patient_id
-
-        if patient_dir.exists() and patient_dir.is_dir():
-            print("folder exists")
-            # check if there are already images for the segment in the folder
-            segment_token = f"{record.patient_id}_{record.segment_id}_{record.hour_token}_{record.signal_type}"
-            existing_images = list(patient_dir.glob(f"{segment_token}__*.png"))
-            if existing_images:
-                print(f"  Found {len(existing_images)} existing images for segment {segment_token}, skipping processing.")
-                existing_amount += 1
-                continue
-        else:
-            print("folder does not exist")
-
-        print(
-            f"  {record.patient_id}_{record.segment_id}_{record.hour_token}_{record.signal_type}"
-        )
-    
-    if len(selected_examples) > 0 and existing_amount == len(selected_examples):
-        print("\nAll selected examples already have images saved. Adjust filters or clear output directory to reprocess.")
+def process_patient_mamba(patient_id: str, db: Optional[lmdb.Environment] = None):
+    """Process a single patient for EEGMamba and save to LMDB."""
+    patient_dir = DATA_ROOT / patient_id
+    label = get_outcome(patient_dir)
+    if label is None:
+        print(f"Outcome not found for patient {patient_id}. Skipping.")
         return
 
-    if not selected_examples:
-        print("No examples selected. Adjust filters in the previous cell.")
+    # Find EEG segments
+    hea_files = sorted(list(patient_dir.glob("*_EEG.hea")))
+    
+    close_db = False
+    if db is None:
+        if not OUTPUT_DB_DIR.exists():
+            OUTPUT_DB_DIR.mkdir(parents=True)
+        db = lmdb.open(str(OUTPUT_DB_DIR), map_size=int(10e9)) # 10GB map size for safety
+        close_db = True
+    
+    for hea_path in hea_files:
+        mat_path = hea_path.with_suffix(".mat")
+        if not mat_path.exists(): continue
+        
+        # Load and calibrate
+        try:
+            signal_uv, metadata = load_icare_segment(hea_path, mat_path)
+            
+            # Standardize to 19 channels
+            standardized, _ = standardize_to_19_channels(signal_uv, metadata["channel_names"])
+            standardized = np.nan_to_num(standardized)
+            
+            # Filtering
+            info = mne.create_info(ch_names=list(CANONICAL_19_ORDER), sfreq=metadata["sampling_rate_hz"], ch_types='eeg')
+            raw = mne.io.RawArray(standardized, info, verbose=False)
+            raw.filter(LOW_CUTOFF_MAMBA, HIGH_CUTOFF_MAMBA, fir_design='firwin', verbose=False)
+            raw.notch_filter(NOTCH_FREQ_MAMBA, fir_design='firwin', verbose=False)
+            
+            # Crop to 10 seconds
+            if raw.times[-1] < WINDOW_SECONDS_MAMBA:
+                continue
+            raw.crop(tmin=0, tmax=WINDOW_SECONDS_MAMBA, include_tmax=False)
+            
+            # Resampling to 200Hz
+            raw.resample(SAMPLING_RATE_MAMBA, verbose=False)
+            data = raw.get_data()
+            
+            # Reshape to (19, 10, 200)
+            window = data.reshape(len(CANONICAL_19_ORDER), WINDOW_SECONDS_MAMBA, SAMPLING_RATE_MAMBA)
+            
+            # Normalize by 100
+            window = window / 100.0
+            
+            sample_key = f"{hea_path.stem}_0"
+            data_dict = {'sample': window.astype(np.float32), 'label': label}
+            
+            with db.begin(write=True) as txn:
+                txn.put(sample_key.encode(), pickle.dumps(data_dict))
+                
+            print(f"Processed and saved {sample_key}")
+            
+        except Exception as e:
+            print(f"Error processing {hea_path.name}: {e}")
+            
+    if close_db:
+        db.close()
 
-    output_dir = EXPORT_ROOT / EXPORT_SPLIT
-    output_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = output_dir / "manifest.csv"
+def do_everything(patient_id: str, db: Optional[lmdb.Environment] = None):
+    """Wrapper to maintain compatibility with connect_to_server_mamba.py"""
+    process_patient_mamba(patient_id, db=db)
 
-    print(f"\nStarting multiprocessing on {len(selected_examples)} segments...")
-    all_manifest_rows: list[dict[str, object]] = []
-
-    max_safe_workers = 4
-    with concurrent.futures.ProcessPoolExecutor(max_workers=max_safe_workers) as executor:
-        results = executor.map(process_and_save_segment, selected_examples)
-
-        for rows in tqdm(results, total=len(selected_examples), desc="Processing segments"):
-            if rows:
-                all_manifest_rows.extend(rows)
-
-    with manifest_path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(
-            handle,
-            fieldnames=[
-                "image_path",
-                "image_path_relative",
-                "patient_id",
-                "segment_token",
-                "channel_name",
-                "height",
-                "width",
-            ],
-        )
-        writer.writeheader()
-        writer.writerows(all_manifest_rows)
-
-    saved_by_patient: dict[str, int] = {}
-    for row in all_manifest_rows:
-        patient_id = row["patient_id"]
-        saved_by_patient[patient_id] = saved_by_patient.get(patient_id, 0) + 1
-
-    print(f"Saved {len(all_manifest_rows)} images to: {output_dir}")
-    for patient_id in sorted(saved_by_patient):
-        print(f"  {patient_id}: {saved_by_patient[patient_id]} images")
-    print(f"Manifest: {manifest_path}")
-
-
-
-if __name__ == '__main__':
-    do_everything("0286")
     
